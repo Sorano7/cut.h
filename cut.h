@@ -45,19 +45,19 @@ void test_run_opt(TestRunOpt opt);
 
 #define TEST_RUN() int main(void) { test_run(); return 0; }
 
-#define ASSERT(exp)                                           \
-    do {                                                      \
-        if (!(exp)) {                                         \
-            __res->failed = true;                             \
-            __res->line = __LINE__;                           \
-            __res->msg = #exp;                                \
-            return;                                           \
-        }                                                     \
+#define ASSERT(exp)                 \
+    do {                            \
+        if (!(exp)) {               \
+            __res->failed = true;   \
+            __res->line = __LINE__; \
+            __res->msg = #exp;      \
+            return;                 \
+        }                           \
     } while (0)
 
 #endif
 
-#define CUT_IMPLEMENTATION
+// #define CUT_IMPLEMENTATION
 #ifdef CUT_IMPLEMENTATION
 
 static TestCase *test_registry_head = NULL;
@@ -109,7 +109,9 @@ void test_run_opt(TestRunOpt opt)
             TestCase *t = tests[i];
             if (t == NULL) continue;
 
-            fprintf(opt.fdout, "[%s:%d] %s ... ", t->file, t->line, t->name);
+            fprintf(opt.fdout, "[%s:%d] \033[36m%s\033[0m ... ", 
+                    t->file, t->line, t->name);
+
             test_ran++;
             t->fn(&res);
 
@@ -117,13 +119,14 @@ void test_run_opt(TestRunOpt opt)
             {
                 // Clears backward and move cursor to col 1
                 fprintf(opt.fdout, "\033[1K\033[1G");
-                fprintf(opt.fdout, "[%s:%d] %s ... ", t->file, res.line, t->name);
-                fprintf(opt.fdout, "failed: %s\n", res.msg);
+                fprintf(opt.fdout, "[%s:%d] \033[36m%s\033[0m ... ", 
+                        t->file, res.line, t->name);
+                fprintf(opt.fdout, "\033[1;31mfailed\033[0m: %s\n", res.msg);
                 test_failed++;
             }
             else
             {
-                fprintf(opt.fdout, "passed\n");
+                fprintf(opt.fdout, "\033[32mpassed\033[0m\n");
             }
 
             free(t);

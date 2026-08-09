@@ -25,6 +25,7 @@ typedef struct
     TestEventType type;
     int line;
     char *message;
+    const char *file;
 } TestEvent;
 
 // The context of a TestCase.
@@ -59,11 +60,11 @@ void test_registry_add(const char *name, TestFn fn, const char *file, int line);
 
 // Test function definition. `__ctx` will be passed.
 #define TEST(t) \
-    static void t(TestCtx *__ctx); \
+    static void t(TestCtx *test_context); \
     static void __attribute__((constructor)) _register_test_##t(void) { \
         test_registry_add(#t, t, __FILE__, __LINE__); \
     } \
-    static void t(TestCtx *__ctx)
+    static void t(TestCtx *test_context)
 
 
 /************************************************
@@ -71,10 +72,17 @@ void test_registry_add(const char *name, TestFn fn, const char *file, int line);
  ************************************************/
 
 // Emit a test event to the test result.
-void test_event_emit(TestCtx *ctx, TestEventType type, int line, const char *fmt, ...);
-#define TE_DEBUG(msg, ...) test_event_emit((__ctx), TEST_EVENT_DEBUG, __LINE__, (msg) __VA_OPT__(,) __VA_ARGS__)
-#define TE_ERROR(msg, ...) test_event_emit((__ctx), TEST_EVENT_ERROR, __LINE__, (msg) __VA_OPT__(,) __VA_ARGS__)
-#define TE_FATAL(msg, ...) test_event_emit((__ctx), TEST_EVENT_FATAL, __LINE__, (msg) __VA_OPT__(,) __VA_ARGS__)
+void test_event_emit(TestCtx *ctx, TestEvent te, const char *fmt, ...);
+#define TE(t, msg, ...) test_event_emit(( \
+    _Generic((test_context), \
+        TestCtx:  &test_context, \
+        TestCtx *: test_context)), \
+    (TestEvent){.type=(t), .line=__LINE__, .file=__FILE__}, \
+    (msg) __VA_OPT__(,) __VA_ARGS__)
+
+#define TE_DEBUG(msg, ...) TE(TEST_EVENT_DEBUG, (msg),  __VA_ARGS__)
+#define TE_ERROR(msg, ...) TE(TEST_EVENT_ERROR, (msg),  __VA_ARGS__)
+#define TE_FATAL(msg, ...) TE(TEST_EVENT_FATAL, (msg),  __VA_ARGS__)
 
 
 /************************************************
@@ -84,7 +92,6 @@ void test_event_emit(TestCtx *ctx, TestEventType type, int line, const char *fmt
 #define DEBUGF(fmt, ...) do { \
     TE_DEBUG(fmt, __VA_ARGS__); \
 } while (0)
-
 
 /************************************************
  * Error Level
@@ -137,7 +144,7 @@ void test_run_opt(TestRunOpt opt);
 #endif
 
 
-// #define CUT_IMPLEMENTATION
+#define CUT_IMPLEMENTATION
 #ifdef CUT_IMPLEMENTATION
 
 #include <stdlib.h>
@@ -148,6 +155,8 @@ static TestCase *test_registry_head = NULL;
 
 // Count of registered tests.
 static size_t test_registry_size = 0;
+
+static TestCtx test_context = {0};
 
 /**
  * Add a test case to the global registry.
@@ -216,7 +225,7 @@ static void test_ctx_add(TestCtx *ctx, TestEvent event)
 /**
  * Emit a test event to the test result.
  */
-void test_event_emit(TestCtx *ctx, TestEventType type, int line, const char *fmt, ...)
+void test_event_emit(TestCtx *ctx, TestEvent te, const char *fmt, ...)
 {
     assert(ctx != NULL);
 
@@ -250,9 +259,10 @@ void test_event_emit(TestCtx *ctx, TestEventType type, int line, const char *fmt
         return;
     }
 
-    test_ctx_add(ctx, (TestEvent){.type=type, .line=line, .message=msg});
+    te.message = msg;
+    test_ctx_add(ctx, te);
 
-    if (type == TEST_EVENT_ERROR || type == TEST_EVENT_FATAL)
+    if (te.type == TEST_EVENT_ERROR || te.type == TEST_EVENT_FATAL)
         ctx->failure_count++;
 
     va_end(args);
@@ -276,9 +286,41 @@ static bool __flatten_test_list(TestCase *head, size_t size, TestCase *out[size]
 #define COLOR_RCT "\033[0m"
 #define COLOR_FN "\033[36m"
 #define COLOR_OK "\033[32m"
-#define COLOR_DEBUG "\033[3m"
+#define COLOR_SUB "\033[2m"
+#define COLOR_DEBUG "\033[0m"
 #define COLOR_ERROR "\033[33m"
 #define COLOR_FATAL "\033[1;31m"
+
+/**
+ * Formatted print for TextCtx.
+ */
+static void test_context_print(TestCtx *ctx, FILE *fdout, const char *prefix)
+{
+    for (size_t ei = 0; ei < ctx->event_count; ei++)
+    {
+        TestEvent event = ctx->events[ei];
+        if (event.type != TEST_EVENT_DEBUG && ctx->failure_count == 0)
+            continue;
+
+        fprintf(fdout, "%s", prefix);
+        fprintf(fdout, COLOR_SUB"[%s:%d] "COLOR_RCT, event.file, event.line);
+        switch (event.type)
+        {
+            case TEST_EVENT_DEBUG: 
+                fprintf(fdout, COLOR_DEBUG"[DEBUG] "); 
+                break;
+
+            case TEST_EVENT_ERROR: 
+                fprintf(fdout, COLOR_ERROR"[ERROR] "); 
+                break;
+
+            case TEST_EVENT_FATAL: 
+                fprintf(fdout, COLOR_FATAL"[FATAL] "); 
+                break;
+        }
+        fprintf(fdout, "%s"COLOR_RCT"\n", event.message);
+    }
+}
 
 /**
  * Run tests with options.
@@ -287,6 +329,8 @@ void test_run_opt(TestRunOpt opt)
 {
     size_t test_ran = 0;
     size_t test_failed = 0;
+
+    test_ctx_init(&test_context);
 
     if (test_registry_size > 0)
     {
@@ -302,43 +346,28 @@ void test_run_opt(TestRunOpt opt)
         {
             TestCase *test = all_tests[ti];
             if (test == NULL) continue;
+            if (ctx.failure_count > 0) test_failed++;
 
-            fprintf(opt.fdout, "[%s:%d] ", test->file, test->line);
+            fprintf(opt.fdout, COLOR_SUB"[%s:%d] "COLOR_RCT, test->file, test->line);
             fprintf(opt.fdout, COLOR_FN"%s"COLOR_RCT" ... ", test->name);
 
             test_ran++;
             test->run(&ctx);
 
-            if (ctx.failure_count > 0)
-            {
-                fprintf(opt.fdout, COLOR_FATAL"failed\n"COLOR_RCT);
+            if (ctx.failure_count > 0) fprintf(opt.fdout, COLOR_FATAL"failed\n"COLOR_RCT);
+            else                       fprintf(opt.fdout, COLOR_OK   "passed\n"COLOR_RCT);
 
-                for (size_t ei = 0; ei < ctx.event_count; ei++)
-                {
-                    fprintf(opt.fdout, "    ");
-                    TestEvent event = ctx.events[ei];
-                    switch (event.type)
-                    {
-                        case TEST_EVENT_DEBUG: fprintf(opt.fdout, COLOR_DEBUG"[DEBUG"); break;
-                        case TEST_EVENT_ERROR: fprintf(opt.fdout, COLOR_ERROR"[ERROR"); break;
-                        case TEST_EVENT_FATAL: fprintf(opt.fdout, COLOR_FATAL"[FATAL"); break;
-                    }
-                    fprintf(opt.fdout, ":%d] ", event.line);
-                    fprintf(opt.fdout, "%s\n"COLOR_RCT, event.message);
-                }
-            }
-            else
-            {
-                fprintf(opt.fdout, COLOR_OK"passed\n"COLOR_RCT);
-            }
+            test_context_print(&ctx, opt.fdout, "    ");
 
-            if (ctx.failure_count > 0) test_failed++;
             free(test);
             all_tests[ti] = NULL;
 
             test_ctx_reset(&ctx);
         }
     }
+
+    fprintf(opt.fdout, "\n");
+    test_context_print(&test_context, opt.fdout, "");
 
 Summary:
     fprintf(opt.fdout, "\nTotal: %zu, passed: %zu, failed: %zu\n", 

@@ -3,18 +3,14 @@
 
 int divide(int a, int b)
 {
-    DEBUGF("b = %d", b);
-    return a + b;
+    DEV_MUST(b != 0);
+    DEV_DEBUG("dividing %d by %d", a, b);
+    return a / b;
 }
 
-TEST(one_plus_one_equals_two)
+TEST(ten_div_two_equals_five)
 {
-    MUST(1 + 1 == 2);
-}
-
-TEST(two_divide_by_one_equals_two)
-{
-    MUST(divide(2, 1));
+    CHECK(divide(10, 2) == 5);
 }
 
 TEST_RUN()

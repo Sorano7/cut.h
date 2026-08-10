@@ -56,15 +56,15 @@ typedef struct TestCase
  ************************************************/
 
 // Add a test case to the global registry.
-void test_registry_add(const char *name, TestFn fn, const char *file, int line);
+void cut_test_registry_add(const char *name, TestFn fn, const char *file, int line);
 
 // Test function definition. `__ctx` will be passed.
 #define TEST(t) \
-    static void t(TestCtx *test_context); \
+    static void t(TestCtx *cut_test_ctx); \
     static void __attribute__((constructor)) _register_test_##t(void) { \
-        test_registry_add(#t, t, __FILE__, __LINE__); \
+        cut_test_registry_add(#t, t, __FILE__, __LINE__); \
     } \
-    static void t(TestCtx *test_context)
+    static void t(TestCtx *cut_test_ctx)
 
 
 /************************************************
@@ -72,55 +72,91 @@ void test_registry_add(const char *name, TestFn fn, const char *file, int line);
  ************************************************/
 
 // Emit a test event to the test result.
-void test_event_emit(TestCtx *ctx, TestEvent te, const char *fmt, ...);
-#define TE(t, msg, ...) test_event_emit(( \
-    _Generic((test_context), \
-        TestCtx:  &test_context, \
-        TestCtx *: test_context)), \
+void cut_test_event_emit(TestCtx *ctx, TestEvent te, const char *fmt, ...);
+#define TE(ctx, t, msg, ...) cut_test_event_emit((ctx), \
     (TestEvent){.type=(t), .line=__LINE__, .file=__FILE__}, \
     (msg) __VA_OPT__(,) __VA_ARGS__)
 
-#define TE_DEBUG(msg, ...) TE(TEST_EVENT_DEBUG, (msg),  __VA_ARGS__)
-#define TE_ERROR(msg, ...) TE(TEST_EVENT_ERROR, (msg),  __VA_ARGS__)
-#define TE_FATAL(msg, ...) TE(TEST_EVENT_FATAL, (msg),  __VA_ARGS__)
+#define TE_DEBUG(msg, ...) TE((cut_test_ctx), TEST_EVENT_DEBUG, (msg),  __VA_ARGS__)
+#define TE_ERROR(msg, ...) TE((cut_test_ctx), TEST_EVENT_ERROR, (msg),  __VA_ARGS__)
+#define TE_FATAL(msg, ...) TE((cut_test_ctx), TEST_EVENT_FATAL, (msg),  __VA_ARGS__); return
+
+#define DEV_TE_DEBUG(msg, ...) TE((&cut_dev_ctx), TEST_EVENT_DEBUG, (msg),  __VA_ARGS__); cut_dev_print()
+#define DEV_TE_ERROR(msg, ...) TE((&cut_dev_ctx), TEST_EVENT_ERROR, (msg),  __VA_ARGS__); cut_dev_print()
+#define DEV_TE_FATAL(msg, ...) TE((&cut_dev_ctx), TEST_EVENT_FATAL, (msg),  __VA_ARGS__); cut_dev_print(); abort()
 
 
 /************************************************
- * Debug Level
+ * Test Features
  ************************************************/
 
-#define DEBUGF(fmt, ...) do { \
+#define DEBUG(fmt, ...) do { \
     TE_DEBUG(fmt, __VA_ARGS__); \
 } while (0)
-
-/************************************************
- * Error Level
- ************************************************/
 
 #define CHECK(exp) do { \
     if (!(exp)) { TE_ERROR(#exp); } \
 } while (0)
 
-#define ERRORF(fmt, ...) do { \
+#define ERROR(fmt, ...) do { \
     TE_ERROR(fmt, __VA_ARGS__); \
 } while (0)
 
+#define MUST(exp) do { \
+    if (!(exp)) { TE_FATAL(#exp); } \
+} while (0)
+
+#define FATAL(fmt, ...) do { \
+    TE_FATAL(fmt, __VA_ARGS__); \
+} while (0)
+
+
 /************************************************
- * Fatal Level
+ * Dev Feautres
  ************************************************/
 
-#define MUST(exp) do { \
-    if (!(exp)) { TE_FATAL(#exp); return ; } \
+// #define CUT_DEV
+#ifdef CUT_DEV
+
+#define DEV_DEBUG(fmt, ...) do { \
+    DEV_TE_DEBUG(fmt, __VA_ARGS__); \
 } while (0)
 
-#define MUST_EQ(got, want) do { \
-    if ((got) != (want)) { TE_FATAL(#got" != "#want); return; } \
+#define DEV_CHECK(exp) do {\
+    if (!(exp)) { DEV_TE_ERROR(#exp); } \
 } while (0)
 
-#define FATALF(fmt, ...) do { \
-    TE_FATAL(fmt, __VA_ARGS__); return; \
+#define DEV_ERROR(fmt, ...)  do { \
+    DEV_TE_ERROR(fmt, __VA_ARGS__); \
 } while (0)
 
+#define DEV_MUST(exp) do {\
+    if (!(exp)) { DEV_TE_FATAL(#exp); } \
+} while (0)
+
+#define DEV_FATAL(fmt, ...) do { \
+    DEV_TE_FATAL(fmt, __VA_ARGS__);  \
+} while (0)
+
+#define TODO(msg) do { \
+    DEV_TE_DEBUG("TODO: "msg); \
+} while (0)
+
+#define UNREACHABLE() do { \
+    DEV_TE_FATAL("unreachable code block"); \
+} while (0)
+
+#else
+
+#define DEV_DEBUG(fmt, ...)    do {} while (0)
+#define DEV_CHECK(exp)         do {} while (0)
+#define DEV_ERROR(fmt, ...)    do {} while (0)
+#define DEV_MUST(exp)          do {} while (0)
+#define DEV_FATAL(fmt, ...)    do {} while (0)
+#define TODO(msg)              do {} while (0)
+#define UNREACHABLE()          do {} while (0)
+
+#endif
 
 /************************************************
  * Test Run
@@ -134,34 +170,37 @@ typedef struct
 } TestRunOpt;
 
 // Run tests with options.
-void test_run_opt(TestRunOpt opt);
-#define test_run(...) test_run_opt((TestRunOpt){ \
+void cut_test_run_opt(TestRunOpt opt);
+#define cut_test_run(...) cut_test_run_opt((TestRunOpt){ \
         .fdout=stdout, __VA_ARGS__})
 
 // Alias for the main function to run all tests.
-#define TEST_RUN() int main(void) { test_run(); return 0; }
+#define TEST_RUN() int main(void) { cut_test_run(); return 0; }
+
+void cut_dev_print(void);
 
 #endif
 
 
-#define CUT_IMPLEMENTATION
+// #define CUT_IMPLEMENTATION
 #ifdef CUT_IMPLEMENTATION
 
 #include <stdlib.h>
 #include <string.h>
 
 // Global linked list of test cases.
-static TestCase *test_registry_head = NULL;
+static TestCase *cut_test_registry_head = NULL;
 
 // Count of registered tests.
-static size_t test_registry_size = 0;
+static size_t cut_test_registry_size = 0;
 
-static TestCtx test_context = {0};
+// Global test context.
+static TestCtx cut_dev_ctx = {0};
 
 /**
  * Add a test case to the global registry.
  */
-void test_registry_add(const char *name, TestFn fn, const char *file, int line)
+void cut_test_registry_add(const char *name, TestFn fn, const char *file, int line)
 {
     TestCase *new_test = malloc(sizeof(TestCase));
     new_test->file = file;
@@ -169,9 +208,9 @@ void test_registry_add(const char *name, TestFn fn, const char *file, int line)
     new_test->run = fn;
     new_test->name = name;
 
-    new_test->next = test_registry_head;
-    test_registry_head = new_test;
-    test_registry_size++;
+    new_test->next = cut_test_registry_head;
+    cut_test_registry_head = new_test;
+    cut_test_registry_size++;
 }
 
 static void test_ctx_reset(TestCtx *ctx)
@@ -209,6 +248,7 @@ static void test_ctx_init(TestCtx *ctx)
 static void test_ctx_add(TestCtx *ctx, TestEvent event)
 {
     if (ctx == NULL) return;
+    if (ctx->events == NULL) test_ctx_init(ctx);
 
     if (ctx->event_count+1 > ctx->event_capacity)
     {
@@ -225,7 +265,7 @@ static void test_ctx_add(TestCtx *ctx, TestEvent event)
 /**
  * Emit a test event to the test result.
  */
-void test_event_emit(TestCtx *ctx, TestEvent te, const char *fmt, ...)
+void cut_test_event_emit(TestCtx *ctx, TestEvent te, const char *fmt, ...)
 {
     assert(ctx != NULL);
 
@@ -294,7 +334,7 @@ static bool __flatten_test_list(TestCase *head, size_t size, TestCase *out[size]
 /**
  * Formatted print for TextCtx.
  */
-static void test_context_print(TestCtx *ctx, FILE *fdout, const char *prefix)
+static void test_ctx_print(TestCtx *ctx, FILE *fdout, const char *prefix)
 {
     for (size_t ei = 0; ei < ctx->event_count; ei++)
     {
@@ -325,22 +365,21 @@ static void test_context_print(TestCtx *ctx, FILE *fdout, const char *prefix)
 /**
  * Run tests with options.
  */
-void test_run_opt(TestRunOpt opt)
+void cut_test_run_opt(TestRunOpt opt)
 {
     size_t test_ran = 0;
     size_t test_failed = 0;
 
-    test_ctx_init(&test_context);
-
-    if (test_registry_size > 0)
+    if (cut_test_registry_size > 0)
     {
-        size_t total = test_registry_size;
+        size_t total = cut_test_registry_size;
         TestCase *all_tests[total];
-        if (!__flatten_test_list(test_registry_head, total, all_tests))
+        if (!__flatten_test_list(cut_test_registry_head, total, all_tests))
             goto Summary;
 
         TestCtx ctx = {0};
         test_ctx_init(&ctx);
+        test_ctx_init(&cut_dev_ctx);
 
         for (size_t ti = 0; ti < total; ti++)
         {
@@ -357,21 +396,31 @@ void test_run_opt(TestRunOpt opt)
             if (ctx.failure_count > 0) fprintf(opt.fdout, COLOR_FATAL"failed\n"COLOR_RCT);
             else                       fprintf(opt.fdout, COLOR_OK   "passed\n"COLOR_RCT);
 
-            test_context_print(&ctx, opt.fdout, "    ");
+            test_ctx_print(&ctx, opt.fdout, "    ");
+            test_ctx_reset(&ctx);
+
+            if (cut_dev_ctx.event_count > 0)
+            {
+                test_ctx_print(&cut_dev_ctx, opt.fdout, "    ");
+                test_ctx_reset(&cut_dev_ctx);
+            }
 
             free(test);
             all_tests[ti] = NULL;
-
-            test_ctx_reset(&ctx);
         }
-    }
 
-    fprintf(opt.fdout, "\n");
-    test_context_print(&test_context, opt.fdout, "");
+    }
 
 Summary:
     fprintf(opt.fdout, "\nTotal: %zu, passed: %zu, failed: %zu\n", 
             test_ran, test_ran-test_failed, test_failed);
+}
+
+void cut_dev_print(void)
+{
+    if (cut_test_registry_size > 0) return;
+    test_ctx_print(&cut_dev_ctx, stdout, "");
+    test_ctx_reset(&cut_dev_ctx);
 }
 
 #endif

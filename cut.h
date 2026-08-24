@@ -213,6 +213,9 @@ static size_t cut_test_registry_size = 0;
 // Global test context.
 static TestCtx cut_dev_ctx = {0};
 
+// Length of the longest test name
+static size_t cut_test_name_max = 0;
+
 /**
  * Add a test case to the global registry.
  */
@@ -227,6 +230,10 @@ void cut_test_registry_add(const char *name, TestFn fn, const char *file, int li
     new_test->next = cut_test_registry_head;
     cut_test_registry_head = new_test;
     cut_test_registry_size++;
+
+    size_t len = strlen(name);
+    if (len > cut_test_name_max)
+        cut_test_name_max = len;
 }
 
 static void test_ctx_reset(TestCtx *ctx)
@@ -422,9 +429,16 @@ void cut_test_run_opt(TestRunOpt opt)
 
             if (ansi) fprintf(opt.fdout, COLOR_SUB);
             fprintf(opt.fdout, "[%s:%d] ", test->file, test->line);
-            if (ansi) fprintf(opt.fdout, COLOR_RCT COLOR_FN);
-            fprintf(opt.fdout, "%s ... ", test->name);
             if (ansi) fprintf(opt.fdout, COLOR_RCT);
+
+            if (ansi) fprintf(opt.fdout, COLOR_FN);
+            fprintf(opt.fdout, "%s", test->name);
+            if (ansi) fprintf(opt.fdout, COLOR_RCT);
+
+            for (size_t len = strlen(test->name); len < cut_test_name_max; len++)
+                fprintf(opt.fdout, " ");
+
+            fprintf(opt.fdout, " ... ");
 
             test_ran++;
             test->run(&ctx);

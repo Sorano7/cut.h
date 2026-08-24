@@ -1023,7 +1023,7 @@ int cut_build_run(int argc, char **argv)
                 generate_run_command(unit->name, cut_builder.build_dir, &sb);
                 exec_command(SV_STR(&sb));
             }
-
+            return 0;
         }
     }
 

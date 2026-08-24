@@ -1,10 +1,6 @@
 #ifndef CUT_H
 #define CUT_H
 
-#include <assert.h>
-#include <stdarg.h>
-#include <vadefs.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -161,7 +157,7 @@ void cut_dev_test_event_emit(TestEvent te, const char *fmt, ...);
 #define TODO(msg)              do {} while (0)
 #define UNREACHABLE()          do {} while (0)
 
-#endif
+#endif // CUT_DEV
 
 /************************************************
  * Test Run
@@ -190,8 +186,23 @@ void cut_dev_print(void);
 // #define CUT_IMPLEMENTATION
 #ifdef CUT_IMPLEMENTATION
 
+#include <assert.h>
+#include <stddef.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
+
+#else
+
+#include <unistd.h>
+
+#endif // _WIN32
 
 // Global linked list of test cases.
 static TestCase *cut_test_registry_head = NULL;
@@ -334,10 +345,10 @@ static bool _flatten_test_list(TestCase *head, size_t size, TestCase *out[size])
     return i == size && head == NULL;
 }
 
-#define COLOR_RCT "\033[0m"
-#define COLOR_FN "\033[36m"
-#define COLOR_OK "\033[32m"
-#define COLOR_SUB "\033[2m"
+#define COLOR_RCT   "\033[0m"
+#define COLOR_FN    "\033[36m"
+#define COLOR_OK    "\033[32m"
+#define COLOR_SUB   "\033[2m"
 #define COLOR_DEBUG "\033[0m"
 #define COLOR_ERROR "\033[33m"
 #define COLOR_FATAL "\033[1;31m"
@@ -347,6 +358,8 @@ static bool _flatten_test_list(TestCase *head, size_t size, TestCase *out[size])
  */
 static void test_ctx_print(TestCtx *ctx, FILE *fdout, const char *prefix)
 {
+    bool ansi = isatty(fileno(fdout));
+
     for (size_t ei = 0; ei < ctx->event_count; ei++)
     {
         TestEvent event = ctx->events[ei];
@@ -354,22 +367,30 @@ static void test_ctx_print(TestCtx *ctx, FILE *fdout, const char *prefix)
             continue;
 
         fprintf(fdout, "%s", prefix);
-        fprintf(fdout, COLOR_SUB"[%s:%d] "COLOR_RCT, event.file, event.line);
+
+        if (ansi) fprintf(fdout, COLOR_SUB);
+        fprintf(fdout, "[%s:%d] ", event.file, event.line);
+        if (ansi) fprintf(fdout, COLOR_RCT);
+
         switch (event.type)
         {
             case TEST_EVENT_DEBUG: 
-                fprintf(fdout, COLOR_DEBUG"[DEBUG] "); 
+                if (ansi) fprintf(fdout, COLOR_DEBUG);
+                fprintf(fdout, "[DEBUG] "); 
                 break;
 
             case TEST_EVENT_ERROR: 
-                fprintf(fdout, COLOR_ERROR"[ERROR] "); 
+                if (ansi) fprintf(fdout, COLOR_ERROR);
+                fprintf(fdout, "[ERROR] "); 
                 break;
 
             case TEST_EVENT_FATAL: 
-                fprintf(fdout, COLOR_FATAL"[FATAL] "); 
+                if (ansi) fprintf(fdout, COLOR_FATAL);
+                fprintf(fdout, "[FATAL] "); 
                 break;
         }
-        fprintf(fdout, "%s"COLOR_RCT"\n", event.message);
+        fprintf(fdout, "%s\n", event.message);
+        if (ansi) fprintf(fdout, COLOR_RCT);
     }
 }
 
@@ -378,6 +399,8 @@ static void test_ctx_print(TestCtx *ctx, FILE *fdout, const char *prefix)
  */
 void cut_test_run_opt(TestRunOpt opt)
 {
+    bool ansi = isatty(fileno(opt.fdout));
+
     size_t test_ran = 0;
     size_t test_failed = 0;
 
@@ -396,16 +419,29 @@ void cut_test_run_opt(TestRunOpt opt)
         {
             TestCase *test = all_tests[ti];
             if (test == NULL) continue;
-            if (ctx.failure_count > 0) test_failed++;
 
-            fprintf(opt.fdout, COLOR_SUB"[%s:%d] "COLOR_RCT, test->file, test->line);
-            fprintf(opt.fdout, COLOR_FN"%s"COLOR_RCT" ... ", test->name);
+            if (ansi) fprintf(opt.fdout, COLOR_SUB);
+            fprintf(opt.fdout, "[%s:%d] ", test->file, test->line);
+            if (ansi) fprintf(opt.fdout, COLOR_RCT COLOR_FN);
+            fprintf(opt.fdout, "%s ... ", test->name);
+            if (ansi) fprintf(opt.fdout, COLOR_RCT);
 
             test_ran++;
             test->run(&ctx);
 
-            if (ctx.failure_count > 0) fprintf(opt.fdout, COLOR_FATAL"failed\n"COLOR_RCT);
-            else                       fprintf(opt.fdout, COLOR_OK   "passed\n"COLOR_RCT);
+            if (ctx.failure_count > 0)
+            {
+                test_failed++;
+                if (ansi) fprintf(opt.fdout, COLOR_FATAL);
+                fprintf(opt.fdout, "failed\n");
+                if (ansi) fprintf(opt.fdout, COLOR_RCT);
+            }
+            else
+            {
+                if (ansi) fprintf(opt.fdout, COLOR_OK);
+                fprintf(opt.fdout, "passed\n");
+                if (ansi) fprintf(opt.fdout, COLOR_RCT);
+            }
 
             test_ctx_print(&ctx, opt.fdout, "    ");
             test_ctx_reset(&ctx);

@@ -84,8 +84,10 @@ typedef struct
 // Convert a C-string to a string view.
 StringView sv_from_cstr(const char *s);
 
-// Convert a string view to C-string. Buffer must be at least sv.len+1.
-void sv_to_cstr(StringView sv, char *buffer);
+#define SV_TO_CSTR(sv, id) \
+    char id[(sv).len]; \
+    memcpy(&id, (sv).data, (sv).len); \
+    id[(sv).len] = '\0';
 
 // Returns if a and b are equal.
 bool sv_equal(StringView a, StringView b);
@@ -119,8 +121,10 @@ void string_appendf(String *s, const char *fmt, ...);
 // Append a variadic formatted string to the string.
 void string_appendvf(String *s, const char *fmt, va_list args);
 
-#define string_free(s)  da_free(s)
-#define string_reset(s) da_reset(s)
+#define string_init(s)       da_init(s)
+#define string_reserve(s, n) da_reserve((s), (n))
+#define string_free(s)       da_free(s)
+#define string_reset(s)      da_reset(s)
 
 
 /************************************************
@@ -444,13 +448,6 @@ StringView sv_from_cstr(const char *s)
     return (StringView){.data=s, .len=strlen(s)};
 }
 
-// Convert a string view to C-string. Buffer must be at least sv.len+1.
-void sv_to_cstr(StringView sv, char *buffer)
-{
-    memcpy(buffer, sv.data, sv.len);
-    buffer[sv.len] = '\0';
-}
-
 // Returns if a and b are equal.
 bool sv_equal(StringView a, StringView b)
 {
@@ -488,8 +485,7 @@ void string_appendvf(String *s, const char *fmt, va_list args)
 // Get the mtime of a file, return -1 if error.
 static int get_mtime(StringView path, time_t *mtime)
 {
-    char path_buf[path.len+1];
-    sv_to_cstr(path, path_buf);
+    SV_TO_CSTR(path, path_buf);
 
     struct stat st;
     if (stat(path_buf, &st) != 0)
@@ -509,8 +505,8 @@ typedef enum
 // Create a directory if it doesn't exist.
 static MkdirResult mkdir_if_not_exist(StringView path)
 {
-    char path_buf[path.len+1];
-    sv_to_cstr(path, path_buf);
+    SV_TO_CSTR(path, path_buf);
+
     if (makedir(path_buf) == 0)
         return MKDIR_CREATED;
 
@@ -570,8 +566,7 @@ static void exec_command(StringView cmd)
 {
     DEV_INFO(SV_FMT, SV_ARG(cmd));
 
-    char cmd_buf[cmd.len+1];
-    sv_to_cstr(cmd, cmd_buf);
+    SV_TO_CSTR(cmd, cmd_buf);
 
     if (system(cmd_buf) != 0)
         DEV_FATAL("Failed to execute command.");
@@ -610,7 +605,7 @@ static void log_list_append(CutLogList *logs, CutLog log, const char *fmt, va_li
     assert(logs);
 
     log.message = malloc(sizeof(String));
-    da_init(log.message);
+    string_init(log.message);
     assert(log.message);
     string_appendvf(log.message, fmt, args);
 
@@ -872,14 +867,14 @@ static bool should_rebuild(StringView file, StringView exe)
 static void cut_rebuild(StringView file)
 {
     String path;
-    da_reserve(&path, 256);
+    string_init(&path);
     string_appendf(&path, SV_FMT, SV_ARG(cut_builder.script_name));
 #ifdef _WIN32
     string_append_view(&path, SV(".exe"));
 #endif
 
     String new_path;
-    da_reserve(&new_path, 256);
+    string_init(&new_path);
     string_appendf(&new_path, SV_FMT".old", SV_ARG(cut_builder.script_name));
 #ifdef _WIN32
     string_append_view(&new_path, SV(".exe"));
@@ -898,7 +893,7 @@ static void cut_rebuild(StringView file)
     string_free(&new_path);
 
     String cmd;
-    da_reserve(&cmd, 256);
+    string_init(&cmd);
 
     string_appendf(&cmd, SV_FMT" ",    SV_ARG(cut_builder.cc));
     string_appendf(&cmd, SV_FMT" ",    SV_ARG(file));
@@ -920,7 +915,7 @@ void cut_build_init_opt(StringView file, CutBuilderOpt opt)
     cut_builder.script_name = opt.script_name;
 
     String sb;
-    da_reserve(&sb, 256);
+    string_init(&sb);
     generate_run_command(cut_builder.script_name, SV(""), &sb);
 
     if (should_rebuild(file, SV_STR(&sb)))
@@ -989,7 +984,7 @@ static CutUnit *cut_build_find_unit(StringView name)
 int cut_build_run(int argc, char **argv)
 {
     String sb;
-    da_reserve(&sb, 1024);
+    string_init(&sb);
 
     StringView args[argc];
     for (int i = 0; i < argc; i++)

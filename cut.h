@@ -356,6 +356,7 @@ typedef struct
     StringView cc;
     StringView build_dir;
     StringView script_name;
+    StringView file;
     CutUnit **units;
     size_t units_len;
 } CutBuilder;
@@ -365,8 +366,8 @@ typedef struct
 
 // Initialize the build with options.
 void cut_build_init_opt(StringView file, CutBuilderOpt opt);
-#define cut_build_init(...) cut_build_init_opt(SV(__FILE__), (CutBuilderOpt){ \
-    .cc=CC_DEFAULT, .build_dir=BUILD_DIR_DEFAULT, \
+#define cut_build_init(...) cut_build_init_opt(SV(__FILE__), \
+    (CutBuilderOpt){.cc=CC_DEFAULT, .build_dir=BUILD_DIR_DEFAULT, \
     .script_name=(StringView){__FILE__, sizeof(__FILE__)-3}, \
     __VA_ARGS__})
 
@@ -439,7 +440,7 @@ static CutBuilder cut_builder = {0};
 
 
 /************************************************
- * Utils
+ * String Utils
  ************************************************/
 
 // Convert a C-string to a string view.
@@ -482,6 +483,27 @@ void string_appendvf(String *s, const char *fmt, va_list args)
     string_append_cstr(s, buffer);
 }
 
+// Format the string list into a whitespace-separated string.
+static void string_list_format(SVList *sl, String *sb, StringView prefix)
+{
+    for (size_t i = 0; i < sl->len; i++)
+    {
+        string_appendf(sb, SV_FMT, SV_ARG(prefix));
+        StringView sv = sl->data[i];
+        string_appendf(sb, SV_FMT" ", SV_ARG(sv));
+    }
+}
+
+/************************************************
+ * Platform Utils
+ ************************************************/
+
+#ifdef _WIN32
+#define PATH_SEP "\\"
+#else
+#define PATH_SEP "/"
+#endif
+
 // Get the mtime of a file, return -1 if error.
 static int get_mtime(StringView path, time_t *mtime)
 {
@@ -516,15 +538,14 @@ static MkdirResult mkdir_if_not_exist(StringView path)
     return MKDIR_FAILED;
 }
 
-// Format the string list into a whitespace-separated string.
-static void string_list_format(SVList *sl, String *sb, StringView prefix)
+// Append the name of the executable to the string builder.
+static void append_exe_name(String *sb, StringView base)
 {
-    for (size_t i = 0; i < sl->len; i++)
-    {
-        string_appendf(sb, SV_FMT, SV_ARG(prefix));
-        StringView sv = sl->data[i];
-        string_appendf(sb, SV_FMT" ", SV_ARG(sv));
-    }
+    string_append_view(sb, base);
+
+#ifdef _WIN32
+    string_appendf(sb, ".exe");
+#endif
 }
 
 // Generate the build command for a unit.
@@ -539,26 +560,18 @@ static void generate_build_command(CutUnit *unit, String *sb)
     string_list_format(&unit->libs, sb, SV("-l"));
 
     string_appendf(sb, "-o "SV_FMT"/", SV_ARG(cut_builder.build_dir));
-    string_appendf(sb, SV_FMT, SV_ARG(unit->name));
+    string_appendf(sb, SV_FMT" ", SV_ARG(unit->name));
 }
 
-// Generate the command to run an executable.
+// Generate the command to run an executable. Contains a trailing whitespace.
 static void generate_run_command(StringView name, StringView parent, String *sb)
 {
-    const char *slash = "/";
-
-#ifdef _WIN32
-    slash = "\\";
-#endif
-
-    string_appendf(sb, ".%s", slash);
+    string_appendf(sb, "."PATH_SEP);
     if (parent.len > 0)
-        string_appendf(sb, SV_FMT"%s", SV_ARG(cut_builder.build_dir), slash);
-    string_append_view(sb, name);
+        string_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.build_dir));
 
-#ifdef _WIN32
-    string_append_view(sb, SV(".exe"));
-#endif
+    append_exe_name(sb, name);
+    string_appendf(sb, " ");
 }
 
 // Run a external command.
@@ -572,6 +585,28 @@ static void exec_command(StringView cmd)
         DEV_FATAL("Failed to execute command.");
 }
 
+// Get the backup name for the script executable.
+static void old_script_exe_name(String *sb)
+{
+    append_exe_name(sb, cut_builder.script_name);
+    string_appendf(sb, ".old");
+}
+
+// Remove a path.
+static void remove_path(StringView path)
+{
+    String cmd;
+    string_init(&cmd);
+
+#ifdef _WIN32
+    string_appendf(&cmd, "del /q /s ");
+#else
+    string_appendf(&cmd, "rm -rf ");
+#endif
+    string_appendf(&cmd, "\""SV_FMT"\"", SV_ARG(path));
+    exec_command(SV_STR(&cmd));
+    string_free(&cmd);
+}
 
 /************************************************
  * Logging
@@ -850,59 +885,60 @@ void _cut_make_sv_list(SVList *sl, ...)
 }
 
 // Checks whether the build script needs rebuilding.
-static bool should_rebuild(StringView file, StringView exe)
+static bool should_rebuild(StringView file, StringView exe_name)
 {
     time_t mtime_file, mtime_exe;
+    String exe;
+    string_init(&exe);
+    append_exe_name(&exe, exe_name);
 
     if (get_mtime(file, &mtime_file) != 0)
         return true;
 
-    if (get_mtime(exe, &mtime_exe) != 0)
+    if (get_mtime(SV_STR(&exe), &mtime_exe) != 0)
         return true;
 
     return difftime(mtime_file, mtime_exe) > 0;
 }
 
 // Rebuild the build script.
-static void cut_rebuild(StringView file)
+static void cut_rebuild(size_t argc, StringView *argv)
 {
-    String path;
-    string_init(&path);
-    string_appendf(&path, SV_FMT, SV_ARG(cut_builder.script_name));
-#ifdef _WIN32
-    string_append_view(&path, SV(".exe"));
-#endif
+    String sb;
+    string_init(&sb);
+    append_exe_name(&sb, cut_builder.script_name);
 
     String new_path;
     string_init(&new_path);
-    string_appendf(&new_path, SV_FMT".old", SV_ARG(cut_builder.script_name));
-#ifdef _WIN32
-    string_append_view(&new_path, SV(".exe"));
-#endif
+    old_script_exe_name(&new_path);
+
+    DEV_INFO("Renaming '"SV_FMT"' to '"SV_FMT"'",
+            SV_ARG(SV_STR(&sb)), SV_ARG(SV_STR(&new_path)));
 
     bool ok = false;
 #ifdef _WIN32
-    ok = MoveFileExA(path.data, new_path.data, MOVEFILE_REPLACE_EXISTING);
+    ok = MoveFileExA(sb.data, new_path.data, MOVEFILE_REPLACE_EXISTING);
 #else
     ok = rename(path.data, new_path.data) == 0;
 #endif
     if (!ok)
-        DEV_FATAL("Failed to rename '"SV_FMT"'", SV_ARG(SV_STR(&path)));
+        DEV_FATAL("Failed to rename '"SV_FMT"'", SV_ARG(SV_STR(&sb)));
 
-    string_free(&path);
     string_free(&new_path);
 
-    String cmd;
-    string_init(&cmd);
+    string_reset(&sb);
 
-    string_appendf(&cmd, SV_FMT" ",    SV_ARG(cut_builder.cc));
-    string_appendf(&cmd, SV_FMT" ",    SV_ARG(file));
-    string_appendf(&cmd, "-o "SV_FMT,  SV_ARG(cut_builder.script_name));
-    exec_command(SV_STR(&cmd));
+    string_appendf(&sb, SV_FMT" ",    SV_ARG(cut_builder.cc));
+    string_appendf(&sb, SV_FMT" ",    SV_ARG(cut_builder.file));
+    string_appendf(&sb, "-o "SV_FMT,  SV_ARG(cut_builder.script_name));
+    exec_command(SV_STR(&sb));
 
-    string_reset(&cmd);
-    generate_run_command(cut_builder.script_name, SV(""), &cmd);
-    exec_command(SV_STR(&cmd));
+    string_reset(&sb);
+    generate_run_command(cut_builder.script_name, SV(""), &sb);
+    for (size_t i = 1; i < argc; i++)
+        string_appendf(&sb, SV_FMT" ", SV_ARG(argv[i]));
+
+    exec_command(SV_STR(&sb));
 
     exit(0);
 }
@@ -913,15 +949,7 @@ void cut_build_init_opt(StringView file, CutBuilderOpt opt)
     cut_builder.cc = opt.cc;
     cut_builder.build_dir = opt.build_dir;
     cut_builder.script_name = opt.script_name;
-
-    String sb;
-    string_init(&sb);
-    generate_run_command(cut_builder.script_name, SV(""), &sb);
-
-    if (should_rebuild(file, SV_STR(&sb)))
-    {
-        cut_rebuild(file);
-    }
+    cut_builder.file = file;
 
     switch (mkdir_if_not_exist(opt.build_dir))
     {
@@ -935,8 +963,6 @@ void cut_build_init_opt(StringView file, CutBuilderOpt opt)
         case MKDIR_FAILED:
             DEV_FATAL("Unknown error occured during directory creation.");
     }
-
-    string_free(&sb);
 }
 
 // Define all units for the build.
@@ -983,17 +1009,31 @@ static CutUnit *cut_build_find_unit(StringView name)
 // Run build.
 int cut_build_run(int argc, char **argv)
 {
-    String sb;
-    string_init(&sb);
+    String cmd;
+    string_init(&cmd);
 
     StringView args[argc];
     for (int i = 0; i < argc; i++)
         args[i] = sv_from_cstr(argv[i]);
 
+    if (should_rebuild(cut_builder.file, cut_builder.script_name))
+        cut_rebuild(argc, args);
+
     if (argc == 2 && sv_equal(args[1], SV("clean")))
     {
-        TODO("clean");
-        return 1;
+        string_appendf(&cmd, SV_FMT PATH_SEP "*", SV_ARG(cut_builder.build_dir));
+        remove_path(SV_STR(&cmd));
+
+        string_reset(&cmd);
+        old_script_exe_name(&cmd);
+        remove_path(SV_STR(&cmd));
+        return 0;
+    }
+
+    if (argc >= 3 && sv_equal(args[1], SV("rebuild")))
+    {
+        cut_rebuild(argc-1, args+1);
+        return 0;
     }
 
     if (argc >= 3)
@@ -1005,24 +1045,26 @@ int cut_build_run(int argc, char **argv)
             if (!unit) 
                 DEV_FATAL("Unit '"SV_FMT"' does not exist.", SV_ARG(args[2]));
 
-            generate_build_command(unit, &sb);
-            exec_command(SV_STR(&sb));
+            generate_build_command(unit, &cmd);
+            exec_command(SV_STR(&cmd));
 
             if (sv_equal(args[1], SV("run")))
             {
-                string_reset(&sb);
-                generate_run_command(unit->name, cut_builder.build_dir, &sb);
-                exec_command(SV_STR(&sb));
+                string_reset(&cmd);
+                generate_run_command(unit->name, cut_builder.build_dir, &cmd);
+                exec_command(SV_STR(&cmd));
             }
             return 0;
         }
     }
 
     printf("Usage: \n"
-           "    <cut> help           show this help\n"
-           "    <cut> build <name>   build the unit\n"
-           "    <cut> run <name>     build and run the unit\n"
-           "    <cut> clean          clean artifacts\n");
+           "    <cut> help             show this help\n"
+           "    <cut> build <name>     build the unit\n"
+           "    <cut> run <name>       build and run the unit\n"
+           "    <cut> clean            clean artifacts\n"
+           "    <cut> rebuild <cmd>    rebuild script executable\n");
+
     return 1;
 }
 

@@ -205,7 +205,6 @@ void cut_test_run_opt(TestRunOpt opt);
 } while (0)
 
 
-// #define CUT_NO_DEV
 #ifdef CUT_NO_DEV
 
 #define DEV_INFO(fmt, ...)     do {} while (0)
@@ -342,7 +341,7 @@ int cut_build_run(int argc, char **argv);
  * Implementation
  ************************************************/
 
-#define CUT_IMPL
+// #define CUT_IMPL
 #ifdef CUT_IMPL
 
 #include <assert.h>

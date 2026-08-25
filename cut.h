@@ -919,7 +919,7 @@ static void cut_rebuild(size_t argc, StringView *argv)
 #ifdef _WIN32
     ok = MoveFileExA(sb.data, new_path.data, MOVEFILE_REPLACE_EXISTING);
 #else
-    ok = rename(path.data, new_path.data) == 0;
+    ok = rename(sb.data, new_path.data) == 0;
 #endif
     if (!ok)
         DEV_FATAL("Failed to rename '"SV_FMT"'", SV_ARG(SV_STR(&sb)));

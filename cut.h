@@ -169,7 +169,7 @@ void _cut_dev_log_append(CutLog log, const char *fmt, ...);
         .level=(lvl), .line=__LINE__, .file=SV(__FILE__)}, \
         (msg) __VA_OPT__(,) __VA_ARGS__)
 
-#define TEST_LOG_INFO(msg, ...)  cut_log_append(CUT_LOG_INFO,  (msg),  __VA_ARGS__); cut_dev_log_print()
+#define TEST_LOG_INFO(msg, ...)  cut_log_append(CUT_LOG_INFO,  (msg),  __VA_ARGS__)
 #define TEST_LOG_DEBUG(msg, ...) cut_log_append(CUT_LOG_DEBUG, (msg),  __VA_ARGS__)
 #define TEST_LOG_ERROR(msg, ...) cut_log_append(CUT_LOG_ERROR, (msg),  __VA_ARGS__)
 #define TEST_LOG_FATAL(msg, ...) cut_log_append(CUT_LOG_FATAL, (msg),  __VA_ARGS__); return

@@ -3,10 +3,70 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
 
 /************************************************
  * Utils
  ************************************************/
+
+// Default capacity for any dynamic array.
+#define DA_DEFAULT_CAP 64
+
+// Initializes and reserves capacity for a dynamic array.
+#define da_reserve(da, c) do { \
+    (da)->len = 0; \
+    (da)->cap = (c) == 0 ? DA_DEFAULT_CAP : (c); \
+    (da)->data = malloc((da)->cap * sizeof(*(da)->data)); \
+} while (0)
+
+// Intializes a dynamic array.
+#define da_init(da) da_reserve(da, DA_DEFAULT_CAP);
+
+// Free a dynamic array.
+#define da_free(da) do { \
+    (da)->len = 0; \
+    (da)->cap = 0; \
+    if ((da)->data) free((da)->data); \
+    (da)->data = NULL; \
+} while (0)
+
+// Reset a dynamic array.
+#define da_reset(da) do { \
+    (da)->len = 0; \
+} while (0)
+
+// Map a function to each item in the dynamic array.
+#define da_map(da, type, f) do { \
+    for (size_t i = 0; i < (da)->len; i++) { \
+        type item = (da)->data[i]; \
+        (f)(item); \
+    } \
+} while (0)
+
+// Map a function to the pointer of each item in the dynamic array.
+#define da_map_ptr(da, type, f) do { \
+    for (size_t i = 0; i < (da)->len; i++) { \
+        type item = (da)->data[i]; \
+        (f)(&item); \
+    } \
+} while (0)
+
+// Append an item to the dynamic array.
+#define da_append(da, item) do { \
+    if ((da)->len >= (da)->cap) { \
+        (da)->cap = (da)->cap == 0 ? 8 : (da)->cap * 2; \
+        (da)->data = realloc((da)->data, (da)->cap * sizeof(*(da)->data)); \
+        if (!(da)->data) abort(); \
+    } \
+    (da)->data[(da)->len++] = (item); \
+} while (0)
+
+// Append n items to the dynamic array.
+#define da_appendn(da, items, n) do { \
+    for (size_t i = 0; i < n; i++) { \
+        da_append(da, items[i]); \
+    } \
+} while (0)
 
 // A readonly view of a string.
 typedef struct
@@ -42,10 +102,16 @@ typedef struct
 } String;
 
 // Append a string view to the string.
-void string_append_view(String *s, StringView value);
+#define string_append_view(s, value) do { \
+    da_appendn((s), (value).data, (value).len); \
+    (s)->data[(s)->len] = '\0'; \
+} while (0)
 
 // Append a C-string to the string.
-void string_append_cstr(String *s, const char *value);
+#define string_append_cstr(s, value) do { \
+    da_appendn((s), (value), strlen(value)); \
+    (s)->data[(s)->len] = '\0'; \
+} while (0)
 
 // Append a formatted string to the string.
 void string_appendf(String *s, const char *fmt, ...);
@@ -53,34 +119,8 @@ void string_appendf(String *s, const char *fmt, ...);
 // Append a variadic formatted string to the string.
 void string_appendvf(String *s, const char *fmt, va_list args);
 
-// Reset the content of the string.
-void string_reset(String *s);
-
-// Free the content of the string.
-void string_free(String *s);
-
-// Default capacity for any dynamic array.
-#define DA_DEFAULT_CAP 8
-
-// Initializes and reserves capacity for a dynamic array.
-#define da_reserve(da, c) do { \
-    (da)->len = 0; \
-    (da)->cap = (c) == 0 ? DA_DEFAULT_CAP : (c); \
-    (da)->data = malloc((da)->cap * sizeof(*(da)->data)); \
-} while (0)
-
-// Intializes a dynamic array.
-#define da_init(da) da_reserve(da, DA_DEFAULT_CAP);
-
-// Append an item to the dynamic array.
-#define da_append(da, item) do { \
-    if ((da)->len >= (da)->cap) { \
-        (da)->cap = (da)->cap == 0 ? 8 : (da)->cap * 2; \
-        (da)->data = realloc((da)->data, (da)->cap * sizeof(*(da)->data)); \
-        if (!(da)->data) abort(); \
-    } \
-    (da)->data[(da)->len++] = (item); \
-} while (0)
+#define string_free(s)  da_free(s)
+#define string_reset(s) da_reset(s)
 
 
 /************************************************
@@ -348,7 +388,6 @@ int cut_build_run(int argc, char **argv);
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -423,27 +462,6 @@ bool sv_equal(StringView a, StringView b)
     return true;
 }
 
-// Append a string view to the string.
-void string_append_view(String *s, StringView value)
-{
-    for (size_t i = 0; i < value.len; i++)
-    {
-        da_append(s, value.data[i]);
-    }
-    s->data[s->len] = '\0';
-}
-
-// Append a C-string to the string.
-void string_append_cstr(String *s, const char *value)
-{
-    while (*value)
-    {
-        da_append(s, *value);
-        value++;
-    }
-    s->data[s->len] = '\0';
-}
-
 // Append a formatted string to the string.
 void string_appendf(String *s, const char *fmt, ...)
 {
@@ -465,19 +483,6 @@ void string_appendvf(String *s, const char *fmt, va_list args)
     char buffer[size+1];
     vsnprintf(buffer, (size_t)size+1, fmt, args);
     string_append_cstr(s, buffer);
-}
-
-// Reset the content of the string.
-void string_reset(String *s)
-{
-    s->len = 0;
-    s->data[s->len] = '\0';
-}
-
-// Free the content of the string.
-void string_free(String *s)
-{
-    if (s->data) free(s->data);
 }
 
 // Get the mtime of a file, return -1 if error.
@@ -556,7 +561,7 @@ static void generate_run_command(StringView name, StringView parent, String *sb)
     string_append_view(sb, name);
 
 #ifdef _WIN32
-    string_append_cstr(sb, ".exe");
+    string_append_view(sb, SV(".exe"));
 #endif
 }
 
@@ -586,22 +591,17 @@ static void exec_command(StringView cmd)
 #define COLOR_ERROR "\033[33m"
 #define COLOR_FATAL "\033[1;31m"
 
+static void log_free(CutLog *log)
+{
+    da_free(log->message);
+}
+
 // Reset a log list.
 static void log_list_reset(CutLogList *logs)
 {
-    assert(logs);
-
     if (logs->data)
-    {
-        for (size_t i = 0; i < logs->len; i++)
-        {
-            CutLog e = logs->data[i];
-            if (e.message) free(e.message);
-        }
-    }
-
-    logs->cap = DA_DEFAULT_CAP;
-    logs->len = 0;
+        da_map_ptr(logs, CutLog, log_free);
+    da_reset(logs);
 }
 
 // Append a log with a formatted message.
@@ -875,14 +875,14 @@ static void cut_rebuild(StringView file)
     da_reserve(&path, 256);
     string_appendf(&path, SV_FMT, SV_ARG(cut_builder.script_name));
 #ifdef _WIN32
-    string_append_cstr(&path, ".exe");
+    string_append_view(&path, SV(".exe"));
 #endif
 
     String new_path;
     da_reserve(&new_path, 256);
     string_appendf(&new_path, SV_FMT".old", SV_ARG(cut_builder.script_name));
 #ifdef _WIN32
-    string_append_cstr(&new_path, ".exe");
+    string_append_view(&new_path, SV(".exe"));
 #endif
 
     bool ok = false;
@@ -988,14 +988,11 @@ static CutUnit *cut_build_find_unit(StringView name)
 // Run build.
 int cut_build_run(int argc, char **argv)
 {
-    (void) argc;
-    (void) argv;
-
     String sb;
     da_reserve(&sb, 1024);
 
     StringView args[argc];
-    for (size_t i = 0; i < argc; i++)
+    for (int i = 0; i < argc; i++)
         args[i] = sv_from_cstr(argv[i]);
 
     if (argc == 2 && sv_equal(args[1], SV("clean")))

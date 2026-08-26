@@ -798,6 +798,7 @@ static void generate_build_command(CutUnit *unit, String *sb)
     str_list_format(&unit->includes, sb, SV("-I"));
     str_list_format(&unit->flags, sb, SV(""));
     str_list_format(&unit->defines, sb, SV("-D"));
+    str_list_format(&unit->lib_dirs, sb, SV("-L"));
     str_list_format(&unit->libs, sb, SV("-l"));
 
     str_appendf(sb, "-o "SV_FMT"/", SV_ARG(cut_builder.build_dir));

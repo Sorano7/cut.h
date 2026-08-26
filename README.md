@@ -29,7 +29,7 @@ int main(int argc, char **argv)
 }
 ```
 
-Bootstrap once with `cc cut.c -o cut`, and run `./cut run my_app` to build and run the defined unit. The build script will automatically rebuild if the script has changed.
+Bootstrap once with `cc cut.c -o cut`, then `./cut build my_app` to build the defined unit. The build script will automatically rebuild itself if the script has changed.
 
 ### Testing
 
@@ -47,15 +47,16 @@ TEST(one_plus_one_equals_three)
 }
 
 TEST_RUN()
+```
 
-// output:
+Output:
 
+```
 [test.c:4] one_plus_one_equals_three ... failed
     [test.c:7] [ERROR] result == 3
     [test.c:8] [DEBUG] result: 2
 
 Total: 1, passed: 0, failed: 1
-
 ```
 
 `TEST_RUN()` defines an entry point, so the test script should be built like any other executable.

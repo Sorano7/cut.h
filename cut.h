@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdlib.h>
 
 /************************************************
  * Utils
@@ -35,19 +36,20 @@
     (da)->len = 0; \
 } while (0)
 
-// Map a function to each item in the dynamic array.
+#define da_for(da, i) for (size_t i = 0; i < (da)->len; i++)
+
+// Map a function accepting and returning type to each item in the dynamic array.
 #define da_map(da, type, f) do { \
-    for (size_t i = 0; i < (da)->len; i++) { \
+    da_for((da), i) { \
         type item = (da)->data[i]; \
-        (f)(item); \
+        (da)->data[i] = (f)(item); \
     } \
 } while (0)
 
-// Map a function to the pointer of each item in the dynamic array.
-#define da_map_ptr(da, type, f) do { \
-    for (size_t i = 0; i < (da)->len; i++) { \
-        type item = (da)->data[i]; \
-        (f)(&item); \
+// Map a function accepting pointer to type to each item in the dynamic array.
+#define da_map_mut(da, type, f) do { \
+    da_for((da), i) { \
+        (f)((type *)(&(da)->data[i])); \
     } \
 } while (0)
 
@@ -63,10 +65,12 @@
 
 // Append n items to the dynamic array.
 #define da_appendn(da, items, n) do { \
-    for (size_t i = 0; i < n; i++) { \
+    size_t len = n; \
+    for (size_t i = 0; i < len; i++) { \
         da_append(da, items[i]); \
     } \
 } while (0)
+
 
 // A readonly view of a string.
 typedef struct
@@ -411,7 +415,6 @@ int cut_build_run(int argc, char **argv);
 #include <assert.h>
 #include <stddef.h>
 #include <stdarg.h>
-#include <stdlib.h>
 #include <time.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -522,7 +525,7 @@ void string_appendvf(String *s, const char *fmt, va_list args)
 // Format the string list into a whitespace-separated string.
 static void string_list_format(SVList *sl, String *sb, StringView prefix)
 {
-    for (size_t i = 0; i < sl->len; i++)
+    da_for(sl, i)
     {
         string_appendf(sb, SV_FMT, SV_ARG(prefix));
         StringView sv = sl->data[i];
@@ -666,7 +669,7 @@ static void log_free(CutLog *log)
 static void log_list_reset(CutLogList *logs)
 {
     if (logs->data)
-        da_map_ptr(logs, CutLog, log_free);
+        da_map_mut(logs, CutLog, log_free);
     da_reset(logs);
 }
 
@@ -809,7 +812,7 @@ static void test_case_info_print(CutTestCase *test, FILE *fdout, bool ansi)
 static bool test_case_status_print(CutLogList *logs, FILE* fdout, bool ansi)
 {
     size_t failure_count = 0;
-    for (size_t i = 0; i < logs->len; i++)
+    da_for(logs, i)
     {
         CutLog log = logs->data[i];
         if (log.level == CUT_LOG_ERROR || log.level == CUT_LOG_FATAL)

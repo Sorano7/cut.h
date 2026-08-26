@@ -54,7 +54,7 @@
 // Append an item to the dynamic array.
 #define da_append(da, item) do { \
     if ((da)->len >= (da)->cap) { \
-        (da)->cap = (da)->cap == 0 ? 8 : (da)->cap * 2; \
+        (da)->cap = (da)->cap == 0 ? DA_DEFAULT_CAP : (da)->cap * 2; \
         (da)->data = realloc((da)->data, (da)->cap * sizeof(*(da)->data)); \
         if (!(da)->data) abort(); \
     } \
@@ -75,15 +75,30 @@ typedef struct
     size_t len;
 } StringView;
 
-// Convert a string literal to a string view.
-#define SV(s) ((StringView){(s), sizeof((s)) - 1})
+// A mutable, owning string.
+typedef struct
+{
+    char *data;
+    size_t len;
+    size_t cap;
+} String;
 
-// Convert a String to a string view.
-#define SV_STR(s) ((StringView){(s)->data, (s)->len})
+StringView _sv_from_lit(const void *p, size_t n);
+StringView _sv_from_cstrp(const void *pp);
+StringView _sv_from_str(const void *p);
+StringView _sv_from_strp(const void *pp);
 
-// Convert a C-string to a string view.
-StringView sv_from_cstr(const char *s);
+// Convert string literal, char pointer, or string to a string view.
+#define SV(s) _Generic(&(s), \
+    char (*)[sizeof(s)]: _sv_from_lit(&(s), sizeof(s)), \
+    char **:             _sv_from_cstrp(&(s)), \
+    const char **:       _sv_from_cstrp(&(s)), \
+    String *:            _sv_from_str(&(s)), \
+    const String *:      _sv_from_str(&(s)), \
+    String **:           _sv_from_strp(&(s)), \
+    const String **:     _sv_from_strp(&(s)))
 
+// Declares a char array named `id`.
 #define SV_TO_CSTR(sv, id) \
     char id[(sv).len]; \
     memcpy(&id, (sv).data, (sv).len); \
@@ -94,14 +109,6 @@ bool sv_equal(StringView a, StringView b);
 
 #define SV_FMT "%.*s"
 #define SV_ARG(s) ((int)(s).len), ((s).data)
-
-// A mutable, owning string.
-typedef struct
-{
-    char *data;
-    size_t len;
-    size_t cap;
-} String;
 
 // Append a string view to the string.
 #define string_append_view(s, value) do { \
@@ -121,10 +128,22 @@ void string_appendf(String *s, const char *fmt, ...);
 // Append a variadic formatted string to the string.
 void string_appendvf(String *s, const char *fmt, va_list args);
 
-#define string_init(s)       da_init(s)
-#define string_reserve(s, n) da_reserve((s), (n))
-#define string_free(s)       da_free(s)
-#define string_reset(s)      da_reset(s)
+#define string_init(s) do { \
+    da_init(s); \
+    (s)->data[0] = '\0'; \
+} while (0)
+
+#define string_reserve(s, n) do { \
+    da_reserve((s), (n)); \
+    (s)->data[0] = '\0'; \
+} while (0)
+
+#define string_free(s) da_free(s)
+
+#define string_reset(s) do { \
+    da_reset(s); \
+    (s)->data[0] = '\0'; \
+} while (0)
 
 
 /************************************************
@@ -443,10 +462,27 @@ static CutBuilder cut_builder = {0};
  * String Utils
  ************************************************/
 
-// Convert a C-string to a string view.
-StringView sv_from_cstr(const char *s)
+StringView _sv_from_lit(const void *p, size_t n)
 {
-    return (StringView){.data=s, .len=strlen(s)};
+    return (StringView){(const char *)p, n-1};
+}
+
+StringView _sv_from_cstrp(const void *pp)
+{
+    const char *const *s = pp;
+    return (StringView){*s, strlen(*s)};
+}
+
+StringView _sv_from_str(const void *p)
+{
+    const String *s = p;
+    return (StringView){s->data, s->len};
+}
+
+StringView _sv_from_strp(const void *pp)
+{
+    const String *const *s = pp;
+    return (StringView){(*s)->data, (*s)->len};
 }
 
 // Returns if a and b are equal.
@@ -604,7 +640,7 @@ static void remove_path(StringView path)
     string_appendf(&cmd, "rm -rf ");
 #endif
     string_appendf(&cmd, "\""SV_FMT"\"", SV_ARG(path));
-    exec_command(SV_STR(&cmd));
+    exec_command(SV(cmd));
     string_free(&cmd);
 }
 
@@ -702,7 +738,7 @@ static void log_list_print(CutLogList *logs, FILE *fdout, const char *prefix)
                 fprintf(fdout, "[FATAL] "); 
                 break;
         }
-        fprintf(fdout, SV_FMT"\n", SV_ARG(SV_STR(log.message)));
+        fprintf(fdout, SV_FMT"\n", SV_ARG(*log.message));
         if (is_ansi) fprintf(fdout, COLOR_RCT);
     }
 }
@@ -861,7 +897,7 @@ void cut_unit_init(CutUnit *unit, const char *name, CutUnitKind kind)
     assert(unit);
     memset(unit, 0, sizeof(*unit));
 
-    unit->name = sv_from_cstr(name);
+    unit->name = SV(name);
     unit->kind = kind;
 }
 
@@ -876,7 +912,7 @@ void _cut_make_sv_list(SVList *sl, ...)
     const char *current = va_arg(args, const char *);
     while (current)
     {
-        StringView sv = sv_from_cstr(current);
+        StringView sv = SV(current);
         da_append(sl, sv);
         current = va_arg(args, const char *);
     }
@@ -895,7 +931,7 @@ static bool should_rebuild(StringView file, StringView exe_name)
     if (get_mtime(file, &mtime_file) != 0)
         return true;
 
-    if (get_mtime(SV_STR(&exe), &mtime_exe) != 0)
+    if (get_mtime(SV(exe), &mtime_exe) != 0)
         return true;
 
     return difftime(mtime_file, mtime_exe) > 0;
@@ -913,7 +949,7 @@ static void cut_rebuild(size_t argc, StringView *argv)
     old_script_exe_name(&new_path);
 
     DEV_INFO("Renaming '"SV_FMT"' to '"SV_FMT"'",
-            SV_ARG(SV_STR(&sb)), SV_ARG(SV_STR(&new_path)));
+            SV_ARG(sb), SV_ARG(new_path));
 
     bool ok = false;
 #ifdef _WIN32
@@ -922,7 +958,7 @@ static void cut_rebuild(size_t argc, StringView *argv)
     ok = rename(sb.data, new_path.data) == 0;
 #endif
     if (!ok)
-        DEV_FATAL("Failed to rename '"SV_FMT"'", SV_ARG(SV_STR(&sb)));
+        DEV_FATAL("Failed to rename '"SV_FMT"'", SV_ARG(sb));
 
     string_free(&new_path);
 
@@ -931,14 +967,14 @@ static void cut_rebuild(size_t argc, StringView *argv)
     string_appendf(&sb, SV_FMT" ",    SV_ARG(cut_builder.cc));
     string_appendf(&sb, SV_FMT" ",    SV_ARG(cut_builder.file));
     string_appendf(&sb, "-o "SV_FMT,  SV_ARG(cut_builder.script_name));
-    exec_command(SV_STR(&sb));
+    exec_command(SV(sb));
 
     string_reset(&sb);
     generate_run_command(cut_builder.script_name, SV(""), &sb);
     for (size_t i = 1; i < argc; i++)
         string_appendf(&sb, SV_FMT" ", SV_ARG(argv[i]));
 
-    exec_command(SV_STR(&sb));
+    exec_command(SV(sb));
 
     exit(0);
 }
@@ -1014,7 +1050,7 @@ int cut_build_run(int argc, char **argv)
 
     StringView args[argc];
     for (int i = 0; i < argc; i++)
-        args[i] = sv_from_cstr(argv[i]);
+        args[i] = SV(argv[i]);
 
     if (should_rebuild(cut_builder.file, cut_builder.script_name))
         cut_rebuild(argc, args);
@@ -1022,11 +1058,11 @@ int cut_build_run(int argc, char **argv)
     if (argc == 2 && sv_equal(args[1], SV("clean")))
     {
         string_appendf(&cmd, SV_FMT PATH_SEP "*", SV_ARG(cut_builder.build_dir));
-        remove_path(SV_STR(&cmd));
+        remove_path(SV(cmd));
 
         string_reset(&cmd);
         old_script_exe_name(&cmd);
-        remove_path(SV_STR(&cmd));
+        remove_path(SV(cmd));
         return 0;
     }
 
@@ -1046,13 +1082,13 @@ int cut_build_run(int argc, char **argv)
                 DEV_FATAL("Unit '"SV_FMT"' does not exist.", SV_ARG(args[2]));
 
             generate_build_command(unit, &cmd);
-            exec_command(SV_STR(&cmd));
+            exec_command(SV(cmd));
 
             if (sv_equal(args[1], SV("run")))
             {
                 string_reset(&cmd);
                 generate_run_command(unit->name, cut_builder.build_dir, &cmd);
-                exec_command(SV_STR(&cmd));
+                exec_command(SV(cmd));
             }
             return 0;
         }

@@ -22,6 +22,7 @@ int main(int argc, char **argv)
     // Available options:
     // - .cc           the compiler to call, default `cc`
     // - .build_dir    the build directory, default `build`
+    // - .script_name  the name of the script executable, default `__FILE__` without .c
     cut_build_init();
 
     CutUnit app;

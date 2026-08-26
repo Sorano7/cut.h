@@ -178,7 +178,7 @@ void str_appendvf(String *s, const char *fmt, va_list args);
 void str_insert(String *s, char v, size_t n);
 
 // Find the index of a character.
-size_t str_find(StringView s, char v);
+size_t sv_find(StringView s, char v);
 
 // Shift a string view by n. Mutates input.
 StringView sv_shift(StringView *s, size_t n);
@@ -186,6 +186,29 @@ StringView sv_shift(StringView *s, size_t n);
 // Shift a string view until the next instance of delim. Mutates input.
 StringView sv_split(StringView *s, char delim);
 
+// Trim whitespaces from the string view.
+StringView sv_trim(StringView s);
+
+typedef struct
+{
+    size_t from;
+    size_t to;
+} SVSLiceOpt;
+
+// Return a slice of the string view.
+StringView sv_slice_opt(StringView s, SVSLiceOpt opt);
+
+#define sv_slice(s, ...) sv_slice_opt((s), (SVSLiceOpt){ \
+        .from=0, .to=SIZE_MAX, __VA_ARGS__})
+
+// Read a full line from the file stream.
+void str_readline(String *s, FILE *stream);
+
+// Check if the string view starts with a prefix.
+bool sv_startswith(StringView s, StringView prefix);
+
+// Check if the string view ends with a suffix.
+bool sv_endswith(StringView s, StringView suffix);
 
 /************************************************
  * Logging
@@ -589,7 +612,7 @@ void str_insert(String *s, char v, size_t n)
 }
 
 // Find the index of a character.
-size_t str_find(StringView s, char v)
+size_t sv_find(StringView s, char v)
 {
     size_t out = SIZE_MAX;
     for (size_t i = 0; i < s.len; i++)
@@ -617,7 +640,7 @@ StringView sv_split(StringView *s, char delim)
 {
     StringView out = *s;
 
-    size_t n = str_find(*s, delim);
+    size_t n = sv_find(*s, delim);
     if (n == SIZE_MAX) 
     {
         s->len = 0;
@@ -627,6 +650,78 @@ StringView sv_split(StringView *s, char delim)
     sv_shift(s, n+1);
     out.len = n;
     return out;
+}
+
+// Trim whitespaces from the string view.
+StringView sv_trim(StringView s)
+{
+    for (;;)
+    {
+        if (isspace(*s.data))
+        {
+            s.data++;
+            s.len--;
+            continue;
+        }
+        break;
+    }
+
+    for (;;)
+    {
+        if (isspace(s.data[s.len-1]))
+        {
+            s.len--;
+            continue;
+        }
+        break;
+    }
+    return s;
+}
+
+// Return a slice of the string view.
+StringView sv_slice_opt(StringView s, SVSLiceOpt opt)
+{
+    if (opt.to == SIZE_MAX) opt.to = s.len;
+    assert(opt.to <= s.len);
+    assert(opt.from < opt.to);
+
+    s.data += opt.from;
+    s.len = opt.to - opt.from;
+    return s;
+}
+
+// Read a full line from the file stream.
+void str_readline(String *s, FILE *stream)
+{
+    char chunk[256];
+    for (;;)
+    {
+        if (!fgets(chunk, sizeof(chunk), stream))
+            break;
+
+        str_append(s, chunk);
+        StringView sv = {chunk, strlen(chunk)};
+        if (sv_find(sv, '\n') != SIZE_MAX) break;
+        if (sv.len < sizeof(chunk)-1) break;
+    }
+}
+
+// Check if the string view starts with a prefix.
+bool sv_startswith(StringView s, StringView prefix)
+{
+    if (prefix.len == 0) return true;
+    if (s.len < prefix.len) return false;
+    s = sv_slice(s, .to=prefix.len);
+    return sv_equal(s, prefix);
+}
+
+// Check if the string view ends with a suffix.
+bool sv_endswith(StringView s, StringView suffix)
+{
+    if (suffix.len == 0) return true;
+    if (s.len < suffix.len) return false;
+    s = sv_slice(s, .from=s.len-suffix.len);
+    return sv_equal(s, suffix);
 }
 
 // Format the string list into a whitespace-separated string.

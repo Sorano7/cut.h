@@ -108,3 +108,40 @@ TEST(string_view_shift_and_split_works)
     CHECK_EQ(tok, "third");
     CHECK_EQ(s, "");
 }
+
+TEST(string_view_slice_works)
+{
+    StringView s = SV("123456789");
+    StringView sl = sv_slice(s);
+    CHECK_EQ(sl, s);
+
+    sl = sv_slice(s, .from=4);
+    CHECK_EQ(sl, "56789");
+
+    sl = sv_slice(s, .to=4);
+    CHECK_EQ(sl, "1234");
+
+    sl = sv_slice(s, .from=5, .to=8);
+    CHECK_EQ(sl, "678");
+}
+
+TEST(sv_trim_works)
+{
+    StringView s = SV("   hello   \n");
+    StringView trimmed = sv_trim(s);
+    CHECK_EQ(trimmed, "hello");
+}
+
+TEST(sv_starts_and_ends_with_works)
+{
+    StringView s = SV("hello, world!");
+    CUT_CHECK(sv_startswith(s, SV("h")));
+    CUT_CHECK(sv_startswith(s, SV("hel")));
+    CUT_CHECK(!sv_startswith(s, SV("ello")));
+    CUT_CHECK(sv_startswith(s, SV("")));
+
+    CUT_CHECK(sv_endswith(s, SV("!")));
+    CUT_CHECK(sv_endswith(s, SV("world!")));
+    CUT_CHECK(!sv_endswith(s, SV("hello")));
+    CUT_CHECK(sv_endswith(s, SV("")));
+}

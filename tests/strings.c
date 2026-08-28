@@ -145,3 +145,20 @@ TEST(sv_starts_and_ends_with_works)
     CUT_CHECK(!sv_endswith(s, SV("hello")));
     CUT_CHECK(sv_endswith(s, SV("")));
 }
+
+TEST(sv_to_int_conversion)
+{
+    int val = 0;
+
+    CUT_MUST(sv_to_int(SV("2"), &val));
+    CUT_CHECK(val == 2);
+
+    CUT_MUST(sv_to_int(SV("123"), &val));
+    CUT_CHECK(val == 123);
+
+    CUT_MUST(sv_to_int(SV("-12345"), &val));
+    CUT_CHECK(val == -12345);
+
+    CUT_MUST(!sv_to_int(SV("2147483648"), &val));
+    CUT_MUST(!sv_to_int(SV("-2147483649"), &val));
+}

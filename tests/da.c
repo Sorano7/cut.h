@@ -74,7 +74,7 @@ TEST(da_appendn_works)
     da_appendn(&il, arr, 5);
     CUT_MUST(il.len == 5);
 
-    da_for(&il, i)
+    DA_FOR(&il, i)
         CUT_CHECK(il.data[i] == arr[i]);
 }
 
@@ -109,11 +109,11 @@ TEST(da_map_works)
 
     da_map(&il, int, succ);
 
-    da_for(&il, i)
+    DA_FOR(&il, i)
         CUT_CHECK(il.data[i] == arr[i]+1);
 
     da_map_mut(&il, int, succ_mut);
 
-    da_for(&il, i)
+    DA_FOR(&il, i)
         CUT_CHECK(il.data[i] == arr[i]+2);
 }

@@ -162,3 +162,14 @@ TEST(bool_or_int_short_can_group)
         CUT_CHECK(h == 1);
     END();
 }
+
+TEST(equal_sign_assigns_value)
+{
+    START();
+        StringView flag = {0};
+        cut_fp_add_flag(&fp, &flag, SV("flag"));
+
+        PARSE(CUT_FP_OK, "--flag=value");
+        CUT_CHECK(sv_equal(flag, "value"));
+    END();
+}

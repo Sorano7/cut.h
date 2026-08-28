@@ -1629,9 +1629,8 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
                     goto positional;
 
                 if (arg.len > 0)
-                {
-                    TODO("parse value");
-                }
+                    val_str = arg;
+
                 break;
         }
 
@@ -1642,7 +1641,7 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
             continue;
         }
 
-        if (pos+1 < argc)
+        if (val_str.len == 0 && pos+1 < argc)
         {
             val_str = SV(argv[pos+1]);
             switch (flag_shape(val_str))

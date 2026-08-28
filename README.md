@@ -60,3 +60,42 @@ Total: 1, passed: 0, failed: 1
 ```
 
 `TEST_RUN()` defines an entry point, so the test script should be built like any other executable.
+
+
+### Flag Parsing (WIP)
+
+```c
+#define CUT_IMPL
+#include "cut.h"
+
+int main(int argc, char **argv)
+{
+    CutFlagParser fp;
+    cut_fp_init(&fp);
+
+    bool help = false;
+    int verbosity = 0;
+    StringView output = {0};
+
+    cut_fp_add_flag(&fp, &help,      SV("help"), .short_name='h');
+    cut_fp_add_flag(&fp, &verbosity, SV("verbose"), .short_name='v');
+    cut_fp_add_flag(&fp, &output,    SV("output"));
+
+    SVList args;
+    da_init(&args);
+
+    cut_fp_parse(&fp, argc, argv, &args);
+}
+
+```
+
+Example arguments:
+
+```
+./cut --help              =>   help = true
+./cut --verbose           =>   verbosity = 1
+./cut abc -vvv            =>   verbosity = 3, args = {"abc"}
+./cut --output file       =>   output = "file"
+./cut -v -- first second  =>   args = {"first", "second"}
+
+```

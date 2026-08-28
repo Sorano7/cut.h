@@ -1592,8 +1592,12 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
 {
     if (argc <= 1) return fp_ok();
 
-    int pos = 1;
     bool seen_sep = false;
+
+    int pos = 1;
+
+    if (cut_fp_get_command(fp, argc, argv).len > 0)
+        pos++;
 
     while (pos < argc)
     {
@@ -1727,8 +1731,7 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
         continue;
 
 positional:
-        if (pos > 1)
-            da_append(out, SV(argv[pos]));
+        da_append(out, SV(argv[pos]));
         pos++;
     }
 

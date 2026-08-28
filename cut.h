@@ -216,6 +216,17 @@ bool sv_endswith(StringView s, StringView suffix);
 // Convert a string view to int.
 bool sv_to_int(StringView s, int *out);
 
+// A dynamic array of string views.
+// Assuming static lifetime for the data.
+typedef struct
+{
+    StringView *data;
+    size_t len;
+    size_t cap;
+} SVList;
+
+void svlist_join(SVList *sv, String *sb, StringView delim);
+
 /************************************************
  * Logging
  ************************************************/
@@ -389,15 +400,6 @@ void cut_test_run_opt(TestRunOpt opt);
  * Build
  ************************************************/
 
-// A dynamic array of string views.
-// Assuming static lifetime for the data.
-typedef struct
-{
-    StringView *data;
-    size_t len;
-    size_t cap;
-} SVList;
-
 // The kinds of a unit.
 typedef enum
 {
@@ -544,6 +546,8 @@ typedef struct
     String *msg;
     CutFPStatus status;
 } CutFPResult;
+
+StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv);
 
 CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 
@@ -848,8 +852,18 @@ bool sv_to_int(StringView s, int *out)
     return true;
 }
 
+void svlist_join(SVList *sv, String *sb, StringView delim)
+{
+    DA_FOR(sv, i)
+    {
+        str_appendf(sb, SV_FMT, SV_ARG(da_at(sv, i)));
+        if (i < sv->len-1)
+            str_appendf(sb, SV_FMT, SV_ARG(delim));
+    }
+}
+
 // Format the string list into a whitespace-separated string.
-static void str_list_format(SVList *sl, String *sb, StringView prefix)
+static void command_format(SVList *sl, String *sb, StringView prefix)
 {
     DA_FOR(sl, i)
     {
@@ -917,12 +931,12 @@ static void generate_build_command(CutUnit *unit, String *sb)
 {
     str_appendf(sb, SV_FMT" ", SV_ARG(cut_builder.cc));
 
-    str_list_format(&unit->sources, sb, SV(""));
-    str_list_format(&unit->includes, sb, SV("-I"));
-    str_list_format(&unit->flags, sb, SV(""));
-    str_list_format(&unit->defines, sb, SV("-D"));
-    str_list_format(&unit->lib_dirs, sb, SV("-L"));
-    str_list_format(&unit->libs, sb, SV("-l"));
+    command_format(&unit->sources, sb, SV(""));
+    command_format(&unit->includes, sb, SV("-I"));
+    command_format(&unit->flags, sb, SV(""));
+    command_format(&unit->defines, sb, SV("-D"));
+    command_format(&unit->lib_dirs, sb, SV("-L"));
+    command_format(&unit->libs, sb, SV("-l"));
 
     str_appendf(sb, "-o "SV_FMT"/", SV_ARG(cut_builder.build_dir));
     str_appendf(sb, SV_FMT" ", SV_ARG(unit->name));
@@ -1559,6 +1573,21 @@ static CutFPResult fp_error(CutFPStatus s, CutFlag f, StringView v)
     return r;
 }
 
+StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv)
+{
+    if (argc <= 1) return SV("");
+
+    StringView arg = SV(argv[1]);
+
+    DA_FOR(&fp->commands, i)
+    {
+        StringView cmd = da_at(&fp->commands, i);
+        if (sv_equal(arg, cmd))
+            return cmd;
+    }
+    return SV("");
+}
+
 CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
 {
     if (argc <= 1) return fp_ok();
@@ -1698,7 +1727,8 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
         continue;
 
 positional:
-        da_append(out, SV(argv[pos]));
+        if (pos > 1)
+            da_append(out, SV(argv[pos]));
         pos++;
     }
 

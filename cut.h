@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 /************************************************
  * Dynamic Array
@@ -615,6 +616,8 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 #else
 
 #include <unistd.h>
+#include <limits.h>
+#include <ctype.h>
 
 #define makedir(x) mkdir(x, 0755)
 

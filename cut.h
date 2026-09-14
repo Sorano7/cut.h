@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 /************************************************
  * Dynamic Array
@@ -122,7 +123,7 @@ StringView _sv_from_strp(const void *pp);
 
 // Declares a char array named `id`.
 #define SV_TO_CSTR(sv, id) \
-    char id[(sv).len]; \
+    char id[(sv).len+1]; \
     memcpy(&id, (sv).data, (sv).len); \
     id[(sv).len] = '\0';
 
@@ -595,7 +596,6 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 
 #include <assert.h>
 #include <stddef.h>
-#include <stdarg.h>
 #include <time.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -1461,6 +1461,9 @@ int cut_build_run(int argc, char **argv)
             {
                 str_reset(&cmd);
                 generate_run_command(unit->name, cut_builder.build_dir, &cmd);
+                for (int i = 3; i < argc; i++)
+                    str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(args[i]));
+
                 exec_command(SV(cmd));
             }
             return 0;

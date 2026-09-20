@@ -492,6 +492,7 @@ typedef struct
 {
     StringView cc;
     StringView build_dir;
+    StringView lib_dir;
     StringView script_name;
 } CutBuilderOpt;
 
@@ -499,6 +500,7 @@ typedef struct
 {
     StringView cc;
     StringView build_dir;
+    StringView lib_dir;
     StringView script_name;
     StringView file;
     CutUnit **units;
@@ -507,11 +509,13 @@ typedef struct
 
 #define CC_DEFAULT        SV("cc")
 #define BUILD_DIR_DEFAULT SV("build")
+#define LIB_DIR_DEFAULT   SV("lib")
 
 // Initialize the build with options.
 void cut_build_init_opt(StringView file, CutBuilderOpt opt);
 #define cut_build_init(...) cut_build_init_opt(SV(__FILE__), \
     (CutBuilderOpt){.cc=CC_DEFAULT, .build_dir=BUILD_DIR_DEFAULT, \
+    .lib_dir=LIB_DIR_DEFAULT, \
     .script_name=(StringView){__FILE__, sizeof(__FILE__)-3}, \
     __VA_ARGS__})
 
@@ -1436,13 +1440,16 @@ static void cmd_build_shared(CutUnit *unit, String *sb)
     str_append(sb, "-shared ");
     cmd_add_objs(unit, sb);
     StringView libname = unit->libname.len == 0 ? unit->name : unit->libname;
-    str_appendf(sb, "-o lib"SV_FMT".so ", SV_ARG(libname));
+    str_appendf(sb, "-o "SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
+    str_appendf(sb, "lib"SV_FMT".so ", SV_ARG(libname));
 }
 
 static void cmd_build_static(CutUnit *unit, String *sb)
 {
     str_append(sb, "ar rcs ");
-    str_appendf(sb, "lib"SV_FMT".a ", SV_ARG(unit->name));
+    str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
+    StringView libname = unit->libname.len == 0 ? unit->name : unit->libname;
+    str_appendf(sb, "lib"SV_FMT".a ", SV_ARG(libname));
     cmd_add_objs(unit, sb);
 }
 
@@ -1499,18 +1506,12 @@ static void cut_rebuild(size_t argc, StringView *argv)
     exit(0);
 }
 
-// Initialize the build with options.
-void cut_build_init_opt(StringView file, CutBuilderOpt opt)
+void cut_create_dir(StringView dir)
 {
-    cut_builder.cc = opt.cc;
-    cut_builder.build_dir = opt.build_dir;
-    cut_builder.script_name = opt.script_name;
-    cut_builder.file = file;
-
-    switch (mkdir_if_not_exist(opt.build_dir))
+    switch (mkdir_if_not_exist(dir))
     {
         case MKDIR_CREATED:
-            DEV_INFO("Created directory: "SV_FMT, SV_ARG(opt.build_dir));
+            DEV_INFO("Created directory: "SV_FMT, SV_ARG(dir));
             break;
 
         case MKDIR_EXISTS:
@@ -1519,6 +1520,19 @@ void cut_build_init_opt(StringView file, CutBuilderOpt opt)
         case MKDIR_FAILED:
             DEV_FATAL("Unknown error occured during directory creation.");
     }
+}
+
+// Initialize the build with options.
+void cut_build_init_opt(StringView file, CutBuilderOpt opt)
+{
+    cut_builder.cc = opt.cc;
+    cut_builder.build_dir = opt.build_dir;
+    cut_builder.lib_dir = opt.lib_dir;
+    cut_builder.script_name = opt.script_name;
+    cut_builder.file = file;
+
+    cut_create_dir(opt.build_dir);
+    cut_create_dir(opt.lib_dir);
 }
 
 // Define all units for the build.

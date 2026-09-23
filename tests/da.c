@@ -1,25 +1,8 @@
 #include "../cut.h"
 
-typedef struct
-{
-    int *data;
-    size_t len;
-    size_t cap;
-} IntList;
-
-typedef struct
-{
-    IntList *data;
-    size_t len;
-    size_t cap;
-} IntListList;
-
-typedef struct
-{
-    char *data;
-    size_t len;
-    size_t cap;
-} CharList;
+DA_DEFINE(IntList, int);
+DA_DEFINE(IntListList, IntList);
+DA_DEFINE(CharList, char);
 
 TEST(da_init_and_reserve_works)
 {

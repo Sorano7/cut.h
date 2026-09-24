@@ -44,6 +44,7 @@
 #define da_last(da)  (da)->data[(da)->len-1]
 
 #define DA_FOR(da, i) for (size_t i = 0; i < (da)->len; i++)
+#define DA_FOREACH(da, T, it) for (T *it = (da)->data; it < (da)->data+(da)->len; it++)
 
 // Map a function accepting and returning type to each item in the dynamic array.
 #define da_map(da, type, f) do { \

@@ -1356,7 +1356,7 @@ static void old_script_exe_name(String *sb)
     str_appendf(sb, ".old");
 }
 
-static void cmd_add_objs(CutUnit *unit, String *sb)
+static inline void cmd_add_objs(CutUnit *unit, String *sb)
 {
     DA_FOR(&unit->sources, i)
     {
@@ -1367,41 +1367,30 @@ static void cmd_add_objs(CutUnit *unit, String *sb)
     }
 }
 
-static void cmd_add_cc(String *sb)
+static inline void cmd_add_cc(String *sb)
 {
     str_appendf(sb, SV_FMT" ", SV_ARG(cut_builder.cc));
 }
 
-static void cmd_add_srcs(CutUnit *unit, String *sb)
+static inline void cmd_add_srcs(CutUnit *unit, String *sb)
 {
     command_format(&unit->sources, sb, SV(""));
 }
 
-static void cmd_add_cflags(CutUnit *unit, String *sb)
+static inline void cmd_add_cflags(CutUnit *unit, String *sb)
 {
     command_format(&unit->includes, sb, SV("-I"));
     command_format(&unit->flags, sb, SV(""));
     command_format(&unit->defines, sb, SV("-D"));
 }
 
-static void cmd_add_links(CutUnit *unit, String *sb)
+static inline void cmd_add_links(CutUnit *unit, String *sb)
 {
     command_format(&unit->lib_dirs, sb, SV("-L"));
     command_format(&unit->libs, sb, SV("-l"));
 }
 
-// Generate the build command for a unit.
-static void cmd_build_exe(CutUnit *unit, String *sb)
-{
-    cmd_add_cc(sb);
-    cmd_add_srcs(unit, sb);
-    cmd_add_cflags(unit, sb);
-    cmd_add_links(unit, sb);
-    str_appendf(sb, "-o "SV_FMT PATH_SEP SV_FMT" ", 
-            SV_ARG(cut_builder.build_dir), SV_ARG(unit->name));
-}
-
-static void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String *sb)
+static inline void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String *sb)
 {
     cmd_add_cc(sb);
     str_append(sb, "-c ");
@@ -1418,7 +1407,17 @@ static void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String *sb)
     exec_command(SV(sb));
 }
 
-static void cmd_build_shared(CutUnit *unit, String *sb)
+static inline void cmd_link_exe(CutUnit *unit, String *sb)
+{
+    cmd_add_cc(sb);
+    cmd_add_objs(unit, sb);
+    cmd_add_cflags(unit, sb);
+    cmd_add_links(unit, sb);
+    str_appendf(sb, "-o "SV_FMT PATH_SEP SV_FMT" ",
+            SV_ARG(cut_builder.build_dir), SV_ARG(unit->name));
+}
+
+static inline void cmd_link_shared(CutUnit *unit, String *sb)
 {
     cmd_add_cc(sb);
     str_append(sb, "-shared ");
@@ -1428,7 +1427,7 @@ static void cmd_build_shared(CutUnit *unit, String *sb)
     str_appendf(sb, "lib"SV_FMT".so ", SV_ARG(libname));
 }
 
-static void cmd_build_static(CutUnit *unit, String *sb)
+static inline void cmd_link_static(CutUnit *unit, String *sb)
 {
     str_append(sb, "ar rcs ");
     str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
@@ -1561,27 +1560,6 @@ static CutUnit *cut_build_find_unit(StringView name)
     return NULL;
 }
 
-static void cut_build_exe(CutUnit *exe, bool run, SVList *args)
-{
-    String cmd;
-    str_init(&cmd);
-
-    cmd_build_exe(exe, &cmd);
-    exec_command(SV(cmd));
-
-    if (run)
-    {
-        str_reset(&cmd);
-        cmd_run_exe(exe->name, cut_builder.build_dir, &cmd);
-        for (size_t i = 1; i < args->len; i++)
-            str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(da_at(args, i)));
-
-        exec_command(SV(cmd));
-    }
-
-    str_free(&cmd);
-}
-
 static void cut_build_objs(CutUnit *unit)
 {
     String cmd;
@@ -1598,6 +1576,29 @@ static void cut_build_objs(CutUnit *unit)
     str_free(&cmd);
 }
 
+static void cut_build_exe(CutUnit *exe, bool run, SVList *args)
+{
+    String cmd;
+    str_init(&cmd);
+
+    cut_build_objs(exe);
+
+    cmd_link_exe(exe, &cmd);
+    exec_command(SV(cmd));
+
+    if (run)
+    {
+        str_reset(&cmd);
+        cmd_run_exe(exe->name, cut_builder.build_dir, &cmd);
+        for (size_t i = 1; i < args->len; i++)
+            str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(da_at(args, i)));
+
+        exec_command(SV(cmd));
+    }
+
+    str_free(&cmd);
+}
+
 static void cut_build_lib(CutUnit *lib)
 {
     String cmd;
@@ -1606,9 +1607,9 @@ static void cut_build_lib(CutUnit *lib)
     cut_build_objs(lib);
 
     if (lib->kind == CUT_UNIT_LIB_SHARED)
-        cmd_build_shared(lib, &cmd);
+        cmd_link_shared(lib, &cmd);
     else
-        cmd_build_static(lib, &cmd);
+        cmd_link_static(lib, &cmd);
     exec_command(SV(cmd));
 
     str_free(&cmd);

@@ -538,6 +538,7 @@ DA_DEFINE(CutFlagList, CutFlag);
 
 typedef struct
 {
+    StringView subcmd;
     SVList commands;
     CutFlagList optional;
 } CutFlagParser;
@@ -558,7 +559,10 @@ void cut_fp_reset(CutFlagParser *fp);
 void cut_fp_free(CutFlagParser *fp);
 
 // Add a command to the flag parser.
-void cut_fp_add_command(CutFlagParser *fp, StringView cmd);
+void cut_fp_add_command(CutFlagParser *fp, const char *cmd);
+void _cut_fp_add_commands(CutFlagParser *fp, const char *first, ...);
+#define cut_fp_add_commands(fp, first, ...) \
+    _cut_fp_add_commands((fp), (first) __VA_OPT__(,) __VA_ARGS__, NULL)
 
 // Add an optional flag to the flag parser.
 void cut_fp_add_flag_opt(CutFlagParser *fp, CutFlagKind kind, 
@@ -569,7 +573,7 @@ void cut_fp_add_flag_opt(CutFlagParser *fp, CutFlagKind kind,
         bool *:       CUT_FLAG_BOOL, \
         int *:        CUT_FLAG_INT, \
         StringView *: CUT_FLAG_STR), \
-    (data), (name), (CutFlagOpt){ \
+    (data), name, (CutFlagOpt){ \
         .desc=SV(""), .short_name=0, \
     __VA_ARGS__})
 
@@ -585,8 +589,6 @@ typedef struct
     String *msg;
     CutFPStatus status;
 } CutFPResult;
-
-StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv);
 
 CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 
@@ -1447,7 +1449,7 @@ static void cmd_run_exe(StringView name, StringView parent, String *sb)
 }
 
 // Rebuild the build script.
-static void cut_rebuild(size_t argc, StringView *argv)
+static void cut_rebuild(StringView subcmd, SVList *args)
 {
     String sb;
     str_init(&sb);
@@ -1480,8 +1482,12 @@ static void cut_rebuild(size_t argc, StringView *argv)
 
     str_reset(&sb);
     cmd_run_exe(cut_builder.script_name, SV(""), &sb);
-    for (size_t i = 1; i < argc; i++)
-        str_appendf(&sb, SV_FMT" ", SV_ARG(argv[i]));
+    str_appendf(&sb, SV_FMT" ", SV_ARG(subcmd));
+    DA_FOREACH(args, StringView, arg)
+    {
+        if (!sv_equal(*arg, "--rebuild") && !sv_equal(*arg, "-r"))
+            str_appendf(&sb, SV_FMT" ", SV_ARG(*arg));
+    }
 
     exec_command(SV(sb));
 
@@ -1555,7 +1561,7 @@ static CutUnit *cut_build_find_unit(StringView name)
     return NULL;
 }
 
-static void cut_build_exe(CutUnit *exe, bool run, StringView *args, int count)
+static void cut_build_exe(CutUnit *exe, bool run, SVList *args)
 {
     String cmd;
     str_init(&cmd);
@@ -1567,8 +1573,8 @@ static void cut_build_exe(CutUnit *exe, bool run, StringView *args, int count)
     {
         str_reset(&cmd);
         cmd_run_exe(exe->name, cut_builder.build_dir, &cmd);
-        for (int i = 0; i < count; i++)
-            str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(args[i]));
+        for (size_t i = 1; i < args->len; i++)
+            str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(da_at(args, i)));
 
         exec_command(SV(cmd));
     }
@@ -1626,63 +1632,81 @@ static void cut_build_clean(void)
 // Run build.
 int cut_build_run(int argc, char **argv)
 {
-    StringView args[argc];
-    for (int i = 0; i < argc; i++)
-        args[i] = SV(argv[i]);
+    CutFlagParser fp;
+    cut_fp_init(&fp);
 
-    if (should_rebuild(cut_builder.file, cut_builder.script_name))
-        cut_rebuild(argc, args);
+    bool rebuild = should_rebuild(cut_builder.file, cut_builder.script_name);
+    cut_fp_add_flag(&fp, &rebuild, SV("rebuild"), .short_name='r');
 
-    StringView subcmd = args[1];
+    cut_fp_add_commands(&fp, "help", "run", "build", "clean");
 
-    if (argc == 2 && sv_equal(subcmd, "clean"))
+    SVList args;
+    da_init(&args);
+
+    CutFPResult res = cut_fp_parse(&fp, argc, argv, &args);
+    StringView subcmd = fp.subcmd;
+    if (res.status != CUT_FP_OK)
+        DEV_FATAL("Error parsing flags: "SV_FMT"\n", SV_ARG(SV(res.msg)));
+    cut_fp_free(&fp);
+
+    if (rebuild) 
+    {
+        cut_rebuild(subcmd, &args);
+        UNREACHABLE();
+    }
+
+    bool ok = true;
+    if (sv_equal(subcmd, "clean"))
     {
         cut_build_clean();
+        goto done;
     }
-    else if (argc >= 3 && sv_equal(subcmd, "rebuild"))
-    {
-        cut_rebuild(argc-1, args+1);
-    }
-    else if (argc >= 3)
-    {
-        bool build = sv_equal(subcmd, "build");
-        bool run = sv_equal(subcmd, "run");
 
-        if (build || run)
+    bool build = sv_equal(subcmd, "build");
+    bool run = sv_equal(subcmd, "run");
+    if (build || run)
+    {
+        if (args.len == 0)
+            DEV_FATAL("Expected unit name.");
+
+        StringView unit_name = args.data[0];
+        CutUnit *unit = cut_build_find_unit(unit_name);
+        if (!unit) 
+            DEV_FATAL("Unit '"SV_FMT"' does not exist.", SV_ARG(unit_name));
+
+        cut_create_dir(cut_builder.build_dir);
+        switch (unit->kind)
         {
-            CutUnit *unit = NULL;
-            unit = cut_build_find_unit(args[2]);
-            if (!unit) 
-                DEV_FATAL("Unit '"SV_FMT"' does not exist.", SV_ARG(args[2]));
+            case CUT_UNIT_EXE:
+                cut_build_exe(unit, run, &args);
+                break;
 
-            cut_create_dir(cut_builder.build_dir);
-            switch (unit->kind)
-            {
-                case CUT_UNIT_EXE:
-                    cut_build_exe(unit, run, args+3, argc-3);
-                    break;
+            case CUT_UNIT_LIB_STATIC:
+            case CUT_UNIT_LIB_SHARED:
+                if (run)
+                    DEV_FATAL("Cannot run library unit. Did you mean 'build'?");
 
-                case CUT_UNIT_LIB_STATIC:
-                case CUT_UNIT_LIB_SHARED:
-                    cut_create_dir(cut_builder.lib_dir);
-                    cut_build_lib(unit);
-                    break;
-            }
+                cut_create_dir(cut_builder.lib_dir);
+                cut_build_lib(unit);
+                break;
         }
-    }
-    else
-    {
-        printf("Usage: \n"
-                "    <cut> help             show this help\n"
-                "    <cut> build <name>     build the unit\n"
-                "    <cut> run <name>       build and run the unit\n"
-                "    <cut> clean            clean artifacts\n"
-                "    <cut> rebuild <cmd>    rebuild script executable\n");
-
-        return 1;
+        goto done;
     }
 
-    return 0;
+    ok = sv_equal(subcmd, "help");
+    printf("Usage:\n"
+            "    <cut> help             show this help\n"
+            "    <cut> build <name>     build the unit\n"
+            "    <cut> run   <name>     build and run the unit\n"
+            "    <cut> clean            clean artifacts\n"
+            "\n"
+            "Options:\n"
+            "    -r | --rebuild         force rebuilding the script\n"
+    );
+
+done:
+    da_free(&args);
+    return ok ? 0 : 1;
 }
 
 
@@ -1693,6 +1717,7 @@ int cut_build_run(int argc, char **argv)
 // Initialize a flag parser.
 void cut_fp_init(CutFlagParser *fp)
 {
+    fp->subcmd = SV("");
     da_init(&fp->commands);
     da_init(&fp->optional);
 }
@@ -1700,6 +1725,7 @@ void cut_fp_init(CutFlagParser *fp)
 // Reset a flag parser's configuration.
 void cut_fp_reset(CutFlagParser *fp)
 {
+    fp->subcmd = SV("");
     da_reset(&fp->commands);
     da_reset(&fp->optional);
 }
@@ -1712,9 +1738,24 @@ void cut_fp_free(CutFlagParser *fp)
 }
 
 // Add a command to the flag parser.
-void cut_fp_add_command(CutFlagParser *fp, StringView cmd)
+void cut_fp_add_command(CutFlagParser *fp, const char *cmd)
 {
-    da_append(&fp->commands, cmd);
+    da_append(&fp->commands, SV(cmd));
+}
+
+void _cut_fp_add_commands(CutFlagParser *fp, const char *first, ...)
+{
+    va_list args;
+    va_start(args, first);
+
+    const char *current = first;
+    while (current)
+    {
+        cut_fp_add_command(fp, current);
+        current = va_arg(args, const char *);
+    }
+
+    va_end(args);
 }
 
 // Add an optional flag to the flag parser.
@@ -1811,7 +1852,7 @@ static CutFPResult fp_error(CutFPStatus s, CutFlag f, StringView v)
     return r;
 }
 
-StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv)
+static StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv)
 {
     if (argc <= 1) return SV("");
 
@@ -1834,8 +1875,12 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
 
     int pos = 1;
 
-    if (cut_fp_get_command(fp, argc, argv).len > 0)
+    StringView subcmd = cut_fp_get_command(fp, argc, argv);
+    if (subcmd.len > 0)
+    {
+        fp->subcmd = subcmd;
         pos++;
+    }
 
     while (pos < argc)
     {

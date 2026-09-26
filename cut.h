@@ -446,7 +446,7 @@ typedef enum
 typedef struct
 {
     StringView name;
-    StringView libname;
+    StringView out_name;
     CutUnitKind kind;
 
     SVList sources;
@@ -470,8 +470,8 @@ void _cut_make_sv_list(SVList *sl, ...);
 #define cut_unit_libs(unit, ...)     _cut_make_sv_list(&(unit)->libs,     __VA_OPT__(__VA_ARGS__,) NULL);
 #define cut_unit_lib_dirs(unit, ...) _cut_make_sv_list(&(unit)->lib_dirs, __VA_OPT__(__VA_ARGS__,) NULL);
 
-#define cut_unit_lib_name(unit, name) do { \
-    (unit)->libname = SV(name); \
+#define cut_unit_out_name(unit, name) do { \
+    (unit)->out_name = SV(name); \
 } while (0)
 
 // Options for builder
@@ -611,26 +611,20 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 #include <sys/types.h>
 
 #ifdef _WIN32
+    #include <io.h>
+    #include <windows.h>
+    #include <direct.h>
 
-#include <io.h>
-#include <windows.h>
-#include <direct.h>
-
-#define isatty     _isatty
-#define fileno     _fileno
-#define stat       _stat
-#define fstat      _fstat
-
-#define makedir(x) _mkdir(x)
-
+    #define isatty     _isatty
+    #define fileno     _fileno
+    #define stat       _stat
+    #define fstat      _fstat
+    #define makedir(x) _mkdir(x)
 #else
-
-#include <unistd.h>
-#include <limits.h>
-#include <ctype.h>
-
-#define makedir(x) mkdir(x, 0755)
-
+    #include <unistd.h>
+    #include <limits.h>
+    #include <ctype.h>
+    #define makedir(x) mkdir(x, 0755)
 #endif // _WIN32
 
 
@@ -1310,6 +1304,7 @@ void cut_unit_init(CutUnit *unit, const char *name, CutUnitKind kind)
     memset(unit, 0, sizeof(*unit));
 
     unit->name = SV(name);
+    unit->out_name = SV(name);
     unit->kind = kind;
 }
 
@@ -1407,14 +1402,29 @@ static inline void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String
     exec_command(SV(sb));
 }
 
+static inline void cmd_output(CutUnit *unit, String *sb)
+{
+    bool lib_shared = unit->kind == CUT_UNIT_LIB_SHARED;
+    bool lib_static = unit->kind == CUT_UNIT_LIB_STATIC;
+    bool is_lib = lib_shared || lib_static;
+
+    StringView out_dir = is_lib ? cut_builder.lib_dir : cut_builder.build_dir;
+    str_appendf(sb, "-o "SV_FMT PATH_SEP, SV_ARG(out_dir));
+
+    StringView out_name = unit->out_name;
+    if (is_lib) str_appendf(sb, "lib");
+    str_append(sb, out_name);
+    if (is_lib) str_appendf(sb, lib_shared ? ".so" : ".a");
+    str_append(sb, " ");
+}
+
 static inline void cmd_link_exe(CutUnit *unit, String *sb)
 {
     cmd_add_cc(sb);
     cmd_add_objs(unit, sb);
     cmd_add_cflags(unit, sb);
     cmd_add_links(unit, sb);
-    str_appendf(sb, "-o "SV_FMT PATH_SEP SV_FMT" ",
-            SV_ARG(cut_builder.build_dir), SV_ARG(unit->name));
+    cmd_output(unit, sb);
 }
 
 static inline void cmd_link_shared(CutUnit *unit, String *sb)
@@ -1422,17 +1432,14 @@ static inline void cmd_link_shared(CutUnit *unit, String *sb)
     cmd_add_cc(sb);
     str_append(sb, "-shared ");
     cmd_add_objs(unit, sb);
-    StringView libname = unit->libname.len == 0 ? unit->name : unit->libname;
-    str_appendf(sb, "-o "SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
-    str_appendf(sb, "lib"SV_FMT".so ", SV_ARG(libname));
+    cmd_output(unit, sb);
 }
 
 static inline void cmd_link_static(CutUnit *unit, String *sb)
 {
     str_append(sb, "ar rcs ");
     str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
-    StringView libname = unit->libname.len == 0 ? unit->name : unit->libname;
-    str_appendf(sb, "lib"SV_FMT".a ", SV_ARG(libname));
+    cmd_output(unit, sb);
     cmd_add_objs(unit, sb);
 }
 
@@ -1589,7 +1596,7 @@ static void cut_build_exe(CutUnit *exe, bool run, SVList *args)
     if (run)
     {
         str_reset(&cmd);
-        cmd_run_exe(exe->name, cut_builder.build_dir, &cmd);
+        cmd_run_exe(exe->out_name, cut_builder.build_dir, &cmd);
         for (size_t i = 1; i < args->len; i++)
             str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(da_at(args, i)));
 

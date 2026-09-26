@@ -7,6 +7,7 @@ int main(int argc, char **argv)
 
     CutUnit test;
     cut_unit_init(&test, "test", CUT_UNIT_EXE);
+    cut_unit_out_name(&test, "cut_test");
     cut_unit_sources(&test, "tests/main.c");
     cut_unit_sources(&test, "tests/da.c", "tests/strings.c", "tests/flags.c");
     cut_unit_flags(&test, "-g", "-Wall", "-Wextra", "-Wno-override-init");

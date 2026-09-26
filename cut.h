@@ -239,6 +239,9 @@ bool sv_startswith(StringView s, StringView prefix);
 // Check if the string view ends with a suffix.
 bool sv_endswith(StringView s, StringView suffix);
 
+// Check if the string view contains the sub string.
+bool sv_contains(StringView s, StringView sub);
+
 // Convert a string view to int.
 bool sv_to_int(StringView s, int *out);
 
@@ -897,6 +900,24 @@ bool sv_endswith(StringView s, StringView suffix)
     return sv_equal(s, suffix);
 }
 
+// Check if the string view contains the sub string.
+bool sv_contains(StringView s, StringView sub)
+{
+    if (sub.len > s.len) return false;
+
+    for (size_t i = 0; i < s.len; i++)
+    {
+        size_t j = 0;
+        for (; j < sub.len; j++)
+        {
+            if (s.data[i+j] != sub.data[j])
+                break;
+        }
+        if (j == sub.len) return true;
+    }
+    return false;
+}
+
 // Convert a string view to int.
 bool sv_to_int(StringView s, int *out)
 {
@@ -1007,14 +1028,43 @@ static MkdirResult mkdir_if_not_exist(StringView path)
     return MKDIR_FAILED;
 }
 
+static inline bool shell_needs_quoting(StringView arg)
+{
+    if (sv_contains(arg, SV(" ")))  return true;
+    if (sv_contains(arg, SV("\\"))) return true;
+    if (sv_contains(arg, SV("\n"))) return true;
+    if (sv_contains(arg, SV("\t"))) return true;
+    if (sv_contains(arg, SV("*")))  return true;
+    if (sv_contains(arg, SV("?")))  return true;
+    if (sv_contains(arg, SV("[")))  return true;
+    if (sv_contains(arg, SV("]")))  return true;
+    if (sv_contains(arg, SV("$")))  return true;
+    if (sv_contains(arg, SV("`")))  return true;
+    if (sv_contains(arg, SV("~")))  return true;
+
+    return false;
+}
+
+static inline void append_shell_safe(String *sb, StringView arg)
+{
+    bool quote = shell_needs_quoting(arg);
+    if (quote) str_append(sb, "\"");
+    str_append(sb, arg);
+    if (quote) str_append(sb, "\"");
+}
+
 // Append the name of the executable to the string builder.
 static void append_exe_name(String *sb, StringView base)
 {
-    str_append_view(sb, base);
-
+    String tmp;
+    str_init(&tmp);
+    str_append(&tmp, base);
 #ifdef _WIN32
-    str_appendf(sb, ".exe");
+    str_appendf(&tmp, ".exe");
 #endif
+
+    append_shell_safe(sb, SV(tmp));
+    str_free(&tmp);
 }
 
 // Run a external command.
@@ -1039,7 +1089,11 @@ static void remove_path(StringView path)
 #else
     str_appendf(&cmd, "rm -rf ");
 #endif
-    str_appendf(&cmd, "\""SV_FMT"\"", SV_ARG(path));
+
+    if (sv_contains(path, SV("*")) || sv_contains(path, SV("~")))
+        str_append(&cmd, path);
+    else
+        append_shell_safe(&cmd, path);
     exec_command(SV(cmd));
     str_free(&cmd);
 }

@@ -458,6 +458,7 @@ typedef struct
     SVList defines;
     SVList libs;
     SVList lib_dirs;
+    bool link_static;
 } CutUnit;
 
 // Initializes a unit.
@@ -475,6 +476,10 @@ void _cut_make_sv_list(SVList *sl, ...);
 
 #define cut_unit_out_name(unit, name) do { \
     (unit)->out_name = SV(name); \
+} while (0)
+
+#define cut_init_static_link(unit, enabled) do { \
+    (unit)->link_static = (enabled); \
 } while (0)
 
 // Options for builder
@@ -1480,6 +1485,8 @@ static inline void cmd_link_exe(CutUnit *unit, String *sb)
     cmd_add_cc(sb);
     cmd_add_objs(unit, sb);
     cmd_add_cflags(unit, sb);
+    if (unit->link_static)
+        str_append(sb, "-static ");
     cmd_add_links(unit, sb);
     cmd_output(unit, sb);
 }

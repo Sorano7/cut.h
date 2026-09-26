@@ -989,9 +989,11 @@ static void command_format(SVList *sl, String *sb, StringView prefix)
  ************************************************/
 
 #ifdef _WIN32
-#define PATH_SEP "\\"
+    #define PATH_SEP "\\"
+    #define PATH_SEP_C '\\'
 #else
-#define PATH_SEP "/"
+    #define PATH_SEP "/"
+    #define PATH_SEP_C '/'
 #endif
 
 // Get the mtime of a file, return -1 if error.
@@ -1098,20 +1100,6 @@ static void remove_path(StringView path)
     str_free(&cmd);
 }
 
-static StringView get_base_name(StringView file)
-{
-    StringView base = sv_split(&file, '.');
-
-    size_t next_fwd = sv_find(base, '/');
-    char delim = next_fwd == SIZE_MAX ? '\\' : '/';
-
-    for (;;)
-    {
-        StringView next = sv_split(&base, delim);
-        if (base.len == 0)
-            return next;
-    }
-}
 
 /************************************************
  * Logging
@@ -1405,14 +1393,27 @@ static void old_script_exe_name(String *sb)
     str_appendf(sb, ".old");
 }
 
+static inline void cmd_add_unique_name(StringView path, StringView ext, String *sb)
+{
+    StringView base = sv_split(&path, '.');
+    str_append(sb, cut_builder.build_dir);
+    str_append(sb, PATH_SEP);
+
+    while (base.len > 0)
+    {
+        str_append(sb, sv_split(&base, PATH_SEP_C));
+        if (base.len > 0)
+            str_append(sb, "_");
+    }
+    str_append(sb, ext);
+}
+
 static inline void cmd_add_objs(CutUnit *unit, String *sb)
 {
-    DA_FOR(&unit->sources, i)
+    DA_FOREACH(&unit->sources, StringView, src)
     {
-        StringView src = da_at(&unit->sources, i);
-        StringView base = get_base_name(src);
-        str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.build_dir));
-        str_appendf(sb, SV_FMT".o ", SV_ARG(base));
+        cmd_add_unique_name(*src, SV(".o"), sb);
+        str_append(sb, " ");
     }
 }
 
@@ -1426,9 +1427,13 @@ static inline void cmd_add_srcs(CutUnit *unit, String *sb)
     command_format(&unit->sources, sb, SV(""));
 }
 
-static inline void cmd_add_cflags(CutUnit *unit, String *sb)
+static inline void cmd_add_includes(CutUnit *unit, String *sb)
 {
     command_format(&unit->includes, sb, SV("-I"));
+}
+
+static inline void cmd_add_cflags(CutUnit *unit, String *sb)
+{
     command_format(&unit->flags, sb, SV(""));
     command_format(&unit->defines, sb, SV("-D"));
 }
@@ -1447,13 +1452,11 @@ static inline void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String
 
     str_appendf(sb, SV_FMT" ", SV_ARG(src));
 
+    cmd_add_includes(unit, sb);
     cmd_add_cflags(unit, sb);
 
-    StringView base = get_base_name(src);
-    str_appendf(sb, "-o "SV_FMT PATH_SEP SV_FMT".o ", 
-            SV_ARG(cut_builder.build_dir), SV_ARG(base));
-
-    exec_command(SV(sb));
+    str_append(sb, "-o ");
+    cmd_add_unique_name(src, SV(".o"), sb);
 }
 
 static inline void cmd_output(CutUnit *unit, String *sb)

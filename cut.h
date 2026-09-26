@@ -1512,9 +1512,6 @@ void cut_build_init_opt(StringView file, CutBuilderOpt opt)
     cut_builder.lib_dir = opt.lib_dir;
     cut_builder.script_name = opt.script_name;
     cut_builder.file = file;
-
-    cut_create_dir(opt.build_dir);
-    cut_create_dir(opt.lib_dir);
 }
 
 // Define all units for the build.
@@ -1658,6 +1655,7 @@ int cut_build_run(int argc, char **argv)
             if (!unit) 
                 DEV_FATAL("Unit '"SV_FMT"' does not exist.", SV_ARG(args[2]));
 
+            cut_create_dir(cut_builder.build_dir);
             switch (unit->kind)
             {
                 case CUT_UNIT_EXE:
@@ -1666,6 +1664,7 @@ int cut_build_run(int argc, char **argv)
 
                 case CUT_UNIT_LIB_STATIC:
                 case CUT_UNIT_LIB_SHARED:
+                    cut_create_dir(cut_builder.lib_dir);
                     cut_build_lib(unit);
                     break;
             }

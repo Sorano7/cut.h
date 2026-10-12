@@ -35,7 +35,7 @@ TEST(string_insert_works)
 {
     String s;
     str_init_with(&s, "helo");
-    str_insert(&s, 'l', 2);
+    str_insert_char(&s, 'l', 2);
     CHECK_EQ(s, "hello");
 }
 
